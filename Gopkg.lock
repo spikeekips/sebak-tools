@@ -3,7 +3,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:57215b8844f1e7f79ffe90bbdc555a1f25f4b9856608a5e6e08f45614f95c437"
+  digest = "1:6c9a62098e7ace89547c7f80b4b813562aa0551c2e85563eeb6f4ab4df83df4d"
   name = "boscoin.io/sebak"
   packages = [
     "lib/common",
@@ -11,7 +11,7 @@
     "lib/transaction",
   ]
   pruneopts = "UT"
-  revision = "0785719e55a5a1913b3587d7008abcdd9301e722"
+  revision = "6e262aba290b22df008722a617643dbd64b17cc8"
 
 [[projects]]
   branch = "master"
@@ -126,7 +126,7 @@
     "xdr",
   ]
   pruneopts = "UT"
-  revision = "a0ce6987f24f009d18691d08435d4fabd00ae0ac"
+  revision = "4c30d59b86f551475a3ac60e5555c0c86ff3cb75"
 
 [[projects]]
   branch = "master"
@@ -145,7 +145,7 @@
     "blake2b",
   ]
   pruneopts = "UT"
-  revision = "0e37d006457bf46f9e6692014ba72ef82c33022c"
+  revision = "e3636079e1a4c1f337f212cc5cd2aca108f6c900"
 
 [[projects]]
   branch = "master"
@@ -162,14 +162,14 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:68023dc297a659d5eb2dafd62eda811456b338c5b3ec3c27da79e8a47d3f456a"
+  digest = "1:8bc8ecef1d63576cfab4d08b44a1f255dd67e5b019b7a44837d62380f266a91c"
   name = "golang.org/x/sys"
   packages = [
     "cpu",
     "unix",
   ]
   pruneopts = "UT"
-  revision = "c2ed4eda69e7f62900806e4cd6e45f0429f859fa"
+  revision = "e4b3c5e9061176387e7cea65e4dc5853801f3fb7"
 
 [[projects]]
   digest = "1:a2ab62866c75542dd18d2b069fec854577a20211d7c0ea6ae746072a1dccdd18"
@@ -198,6 +198,7 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "boscoin.io/sebak/lib/common",
     "boscoin.io/sebak/lib/transaction",
     "github.com/andrew-d/go-termutil",
     "github.com/btcsuite/btcutil/base58",
