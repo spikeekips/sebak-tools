@@ -58,7 +58,7 @@ func main() {
 	}
 
 	var message []byte
-	if flag.NArg() > 2 {
+	if flag.NArg() > 1 {
 		message = []byte(strings.Join(flag.Args()[1:], " "))
 	} else {
 		if !termutil.Isatty(os.Stdin.Fd()) {
@@ -68,9 +68,9 @@ func main() {
 		}
 	}
 
-	fmt.Println("================================================================================")
+	fmt.Println("< original ======================================================================")
 	fmt.Println(strings.TrimSpace(string(message)))
-	fmt.Println("--------------------------------------------------------------------------------")
+	fmt.Println("> signed ========================================================================")
 
 	var tx transaction.Transaction
 	if err = json.Unmarshal(message, &tx); err != nil {
@@ -82,7 +82,6 @@ func main() {
 	tx.Sign(senderKP, []byte(flagNetworkID))
 
 	fmt.Println(tx)
-	fmt.Println("================================================================================")
 
 	os.Exit(0)
 }
