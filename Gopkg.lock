@@ -3,15 +3,16 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:6c9a62098e7ace89547c7f80b4b813562aa0551c2e85563eeb6f4ab4df83df4d"
+  digest = "1:102fa3df84be0dd23b2f8b8f5cf9769bd1f35aa2dcd4c43de8dd2e03b8f24590"
   name = "boscoin.io/sebak"
   packages = [
     "lib/common",
     "lib/error",
     "lib/transaction",
+    "lib/transaction/operation",
   ]
   pruneopts = "UT"
-  revision = "6e262aba290b22df008722a617643dbd64b17cc8"
+  revision = "749948d7069095608dfcf1587e637c0be06ee959"
 
 [[projects]]
   branch = "master"
@@ -41,7 +42,7 @@
   revision = "ab6388e0c60ae4834a1f57511e20c17b5f78be4b"
 
 [[projects]]
-  digest = "1:f592ec2d9272b98eb02af6de8c7c5646db508452ab004dd92d84f18fd9c1755d"
+  digest = "1:b44fe4f532d719dabc8ed9b4e14319ddf1c5f6ad7e801e42f4878e7c87638f33"
   name = "github.com/ethereum/go-ethereum"
   packages = [
     "common",
@@ -50,8 +51,8 @@
     "rlp",
   ]
   pruneopts = "UT"
-  revision = "477eb0933b9529f7deeccc233cc815fe34a8ea56"
-  version = "v1.8.16"
+  revision = "8bbe72075e4e16442c4e28d999edee12e294329e"
+  version = "v1.8.17"
 
 [[projects]]
   digest = "1:586ea76dbd0374d6fb649a91d70d652b7fe0ccffb8910a77468e7702e7901f3d"
@@ -60,6 +61,22 @@
   pruneopts = "UT"
   revision = "2fee6af1a9795aafbe0253a0cfbdf668e1fb8a9a"
   version = "v1.8.0"
+
+[[projects]]
+  digest = "1:c79fb010be38a59d657c48c6ba1d003a8aa651fa56b579d959d74573b7dff8e1"
+  name = "github.com/gorilla/context"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "08b5f424b9271eedf6f9f0ce86cb9396ed337a42"
+  version = "v1.1.1"
+
+[[projects]]
+  digest = "1:e73f5b0152105f18bc131fba127d9949305c8693f8a762588a82a48f61756f5f"
+  name = "github.com/gorilla/mux"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "e3702bed27f0d39777b0b37b664b6280e8ef8fbf"
+  version = "v1.6.2"
 
 [[projects]]
   digest = "1:e96640e5b9ce93e2d7ee18f48048483080fd23e72e3c38bc17e9c8b77062031a"
@@ -126,7 +143,7 @@
     "xdr",
   ]
   pruneopts = "UT"
-  revision = "4c30d59b86f551475a3ac60e5555c0c86ff3cb75"
+  revision = "92db8e1f6fa5eeb4733ffd224214976ab1a97cd0"
 
 [[projects]]
   branch = "master"
@@ -135,17 +152,6 @@
   packages = ["xdr3"]
   pruneopts = "UT"
   revision = "0bc96f33a18ef2f963e75431dbed042129eb421b"
-
-[[projects]]
-  branch = "master"
-  digest = "1:3aaa42af336c850a204bb12ae43f6e0f514c1908b577257d33496bf222be295e"
-  name = "golang.org/x/crypto"
-  packages = [
-    "argon2",
-    "blake2b",
-  ]
-  pruneopts = "UT"
-  revision = "e3636079e1a4c1f337f212cc5cd2aca108f6c900"
 
 [[projects]]
   branch = "master"
@@ -158,18 +164,15 @@
     "idna",
   ]
   pruneopts = "UT"
-  revision = "4dfa2610cdf3b287375bbba5b8f2a14d3b01d8de"
+  revision = "49bb7cea24b1df9410e1712aa6433dae904ff66a"
 
 [[projects]]
   branch = "master"
-  digest = "1:8bc8ecef1d63576cfab4d08b44a1f255dd67e5b019b7a44837d62380f266a91c"
+  digest = "1:0a40b0bdd57a93e741d8557465be3a2edeec408e9b6399586ad65bbe8e355796"
   name = "golang.org/x/sys"
-  packages = [
-    "cpu",
-    "unix",
-  ]
+  packages = ["unix"]
   pruneopts = "UT"
-  revision = "e4b3c5e9061176387e7cea65e4dc5853801f3fb7"
+  revision = "fa43e7bc11baaae89f3f902b2b4d832b68234844"
 
 [[projects]]
   digest = "1:a2ab62866c75542dd18d2b069fec854577a20211d7c0ea6ae746072a1dccdd18"

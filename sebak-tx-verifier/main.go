@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -53,7 +54,7 @@ func main() {
 
 	var err error
 	var tx transaction.Transaction
-	if tx, err = transaction.NewTransactionFromJSON(message); err != nil {
+	if err = json.Unmarshal(message, &tx); err != nil {
 		printError(err.Error())
 	}
 
