@@ -83,5 +83,11 @@ func main() {
 
 	fmt.Println(tx)
 
+	networkID := []byte(flagNetworkID)
+	networkID = append(networkID, []byte(tx.B.MakeHashString())...)
+	fmt.Println("network-id", []byte(flagNetworkID))
+	fmt.Println("sig data", networkID)
+	fmt.Println("hash", tx.B.MakeHashString())
+
 	os.Exit(0)
 }

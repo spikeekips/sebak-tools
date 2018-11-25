@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/stellar/go/keypair"
 
 	"boscoin.io/sebak/lib/common"
 	"boscoin.io/sebak/lib/transaction"
+	"boscoin.io/sebak/lib/transaction/operation"
 )
 
 var (
@@ -35,7 +37,7 @@ func printError(s string, err error) {
 	if len(s) > 0 {
 		fmt.Println("error:", s, "", errString)
 	}
-	fmt.Fprintf(os.Stderr, "Usage: %s <sender's secret seed> <receiver's public address> <amount>\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage: %s <sender's secret seed> <receiver's public address> [<amount>]\n", os.Args[0])
 
 	flag.PrintDefaults()
 	os.Exit(2)
@@ -43,7 +45,7 @@ func printError(s string, err error) {
 
 func main() {
 	var senderKP *keypair.Full
-	if flag.NArg() != 3 {
+	if flag.NArg() < 2 {
 		printError("empty input", nil)
 	}
 
@@ -61,37 +63,33 @@ func main() {
 		printError("<receiver's public address>:", err)
 	}
 
-	var amount common.Amount
-	if amount, err = common.AmountFromString(flag.Arg(2)); err != nil {
-		printError("<amount>:", err)
+	amount := common.BaseReserve
+	if flag.NArg() == 3 {
+		if amount, err = common.AmountFromString(flag.Arg(2)); err != nil {
+			printError("<amount>:", err)
+		}
 	}
 
-	opb := transaction.NewOperationBodyCreateAccount(receiverKP.Address(), amount, "")
-	op := transaction.Operation{
-		H: transaction.OperationHeader{Type: transaction.OperationCreateAccount},
+	opb := operation.NewCreateAccount(receiverKP.Address(), amount, "")
+	op := operation.Operation{
+		H: operation.Header{Type: operation.TypeCreateAccount},
 		B: opb,
 	}
 
-	ops := []transaction.Operation{op}
+	tx, err := transaction.NewTransaction(senderKP.Address(), 0, op)
 
-	var sequenceID uint64
-	txBody := transaction.TransactionBody{
-		Source:     senderKP.Address(),
-		Fee:        common.BaseFee.MustMult(len(ops)),
-		SequenceID: sequenceID,
-		Operations: ops,
-	}
-
-	tx := transaction.Transaction{
-		T: "transaction",
-		H: transaction.TransactionHeader{
-			Created: common.NowISO8601(),
-			Hash:    txBody.MakeHashString(),
-		},
-		B: txBody,
+	if err != nil {
+		printError("", err)
 	}
 	tx.Sign(senderKP, []byte(flagNetworkID))
 
+	networkID := []byte(flagNetworkID)
+	networkID = append(networkID, []byte(tx.B.MakeHashString())...)
+	fmt.Println("network-id", []byte(flagNetworkID))
+	e, _ := rlp.EncodeToBytes(tx.B)
+	fmt.Println("   rlp:", e)
+	fmt.Println("sig data", networkID)
+	fmt.Println("hash", tx.B.MakeHashString())
 	fmt.Println(tx)
 
 	os.Exit(0)

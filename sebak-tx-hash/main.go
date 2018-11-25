@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -9,7 +8,9 @@ import (
 	"strings"
 
 	termutil "github.com/andrew-d/go-termutil"
+	"github.com/ethereum/go-ethereum/rlp"
 
+	"boscoin.io/sebak/lib/common"
 	"boscoin.io/sebak/lib/transaction"
 )
 
@@ -46,12 +47,17 @@ func main() {
 	}
 
 	var tx transaction.Transaction
-	if err = json.Unmarshal(message, &tx); err != nil {
+	if err = common.DecodeJSONValue(message, &tx); err != nil {
 		printError("<message>", err)
 		return
 	}
 
-	fmt.Println(tx.B.MakeHashString())
+	e, _ := rlp.EncodeToBytes(tx.B)
+	fmt.Println("   rlp:", e)
+	c := common.MakeHash(e)
+	fmt.Println("sha256:", c)
+
+	fmt.Println("base58:", tx.B.MakeHashString())
 
 	os.Exit(0)
 }
