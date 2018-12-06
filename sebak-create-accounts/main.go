@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -234,7 +235,7 @@ func getAccount(address string) (ac BlockAccount, err error) {
 		return
 	}
 
-	if err = common.DecodeJSONValue(b, &ac); err != nil {
+	if err = json.Unmarshal(b, &ac); err != nil {
 		log_.Error("failed parse", "error", err)
 		return
 	}

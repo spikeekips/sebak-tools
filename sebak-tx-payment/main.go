@@ -9,6 +9,7 @@ import (
 
 	"boscoin.io/sebak/lib/common"
 	"boscoin.io/sebak/lib/transaction"
+	"boscoin.io/sebak/lib/transaction/operation"
 )
 
 var (
@@ -66,16 +67,16 @@ func main() {
 		printError("<amount>:", err)
 	}
 
-	opb := transaction.NewOperationBodyPayment(receiverKP.Address(), amount)
-	op := transaction.Operation{
-		H: transaction.OperationHeader{Type: transaction.OperationPayment},
+	opb := operation.NewPayment(receiverKP.Address(), amount)
+	op := operation.Operation{
+		H: operation.Header{Type: operation.TypePayment},
 		B: opb,
 	}
 
-	ops := []transaction.Operation{op}
+	ops := []operation.Operation{op}
 
 	var sequenceID uint64
-	txBody := transaction.TransactionBody{
+	txBody := transaction.Body{
 		Source:     senderKP.Address(),
 		Fee:        common.BaseFee.MustMult(len(ops)),
 		SequenceID: sequenceID,
@@ -83,8 +84,7 @@ func main() {
 	}
 
 	tx := transaction.Transaction{
-		T: "transaction",
-		H: transaction.TransactionHeader{
+		H: transaction.Header{
 			Created: common.NowISO8601(),
 			Hash:    txBody.MakeHashString(),
 		},
