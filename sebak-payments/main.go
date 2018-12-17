@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -41,19 +42,19 @@ var (
 	networkID       []byte
 	endpoint        *common.Endpoint
 	logLevel        logging.Lvl
-	log             logging.Logger = logging.New("module", "sebak-create-accounts")
+	log             logging.Logger = logging.New("module", "sebak-payments")
 	kp              *keypair.Full
 	requestTimeout  time.Duration
 	confirmDuration time.Duration
 	accounts        map[string]Account
-	totalBalance    common.Amount
+	totalAmount     common.Amount
 	client          *network.HTTP2NetworkClient
 	operationsLimit int = defaultOperationsLimit
 )
 
 type Account struct {
 	address string
-	balance common.Amount
+	amount  common.Amount
 }
 
 type BlockAccount struct {
@@ -134,7 +135,7 @@ func init() {
 		defer f.Close()
 
 		var address string
-		var balance common.Amount
+		var amount common.Amount
 
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
@@ -155,12 +156,12 @@ func init() {
 				printError("duplicated public address found", fmt.Errorf(address))
 			} else if address == kp.Address() {
 				printError("duplicated public address found with secret seed", fmt.Errorf(address))
-			} else if balance, err = common.AmountFromString(sl[1]); err != nil {
+			} else if amount, err = common.AmountFromString(sl[1]); err != nil {
 				printError("invalid balance found", err)
 			}
 
-			accounts[address] = Account{address: address, balance: balance}
-			totalBalance = totalBalance.MustAdd(balance)
+			accounts[address] = Account{address: address, amount: amount}
+			totalAmount = totalAmount.MustAdd(amount)
 		}
 
 		if err := scanner.Err(); err != nil {
@@ -206,6 +207,9 @@ func init() {
 			printError("Error while creating network client", err)
 		}
 		client = network.NewHTTP2NetworkClient(endpoint, connection)
+		header := http.Header{}
+		header.Set("X-Forwarded-For", "1.1.1.1")
+		client.SetDefaultHeaders(header)
 
 		resp, err := client.Get("/")
 		if err != nil {
@@ -227,7 +231,7 @@ func init() {
 	parsedFlags = append(parsedFlags, "\n\trequest-timeout", flagRequestTimeout)
 	parsedFlags = append(parsedFlags, "\n\tconfirm-duration", flagConfirmDuration)
 	parsedFlags = append(parsedFlags, "\n\taccounts", len(accounts))
-	parsedFlags = append(parsedFlags, "\n\ttotal-balance", totalBalance)
+	parsedFlags = append(parsedFlags, "\n\ttotal-amount", totalAmount)
 	parsedFlags = append(parsedFlags, "\n\tnetwork-id", string(networkID))
 	parsedFlags = append(parsedFlags, "\n\tops", operationsLimit)
 	parsedFlags = append(parsedFlags, "\n", "")
@@ -300,12 +304,13 @@ func checkTransaction(hash string) (err error) {
 		log_.Error("failed to check transactions", "error", err)
 		return
 	}
+
 	log_.Debug("success")
 	return
 }
 
-func createAccount(targets []Account) (err error) {
-	log_ := log.New(logging.Ctx{"m": "create-accounts", "uid": common.GenerateUUID()})
+func payment(targets []Account) (err error) {
+	log_ := log.New(logging.Ctx{"m": "payment", "uid": common.GenerateUUID()})
 
 	// create accounts
 	defer func(l logging.Logger) {
@@ -330,9 +335,9 @@ func createAccount(targets []Account) (err error) {
 
 	var ops []operation.Operation
 	for _, account := range targets {
-		op, _ := operation.NewOperation(operation.CreateAccount{
+		op, _ := operation.NewOperation(operation.Payment{
 			Target: account.address,
-			Amount: account.balance,
+			Amount: account.amount,
 		})
 		ops = append(ops, op)
 	}
@@ -369,11 +374,14 @@ func createAccount(targets []Account) (err error) {
 }
 
 func main() {
+	oldAccounts := map[string]BlockAccount{}
+
 	for _, account := range accounts {
-		_, err := getAccount(account.address)
-		if err == nil {
-			printError(fmt.Sprintf("account already exists: %s", account.address), err)
+		ac, err := getAccount(account.address)
+		if err != nil {
+			printError(fmt.Sprintf("failed to get account: %s", account.address), err)
 		}
+		oldAccounts[ac.Address] = ac
 	}
 
 	var targets []Account
@@ -381,8 +389,8 @@ func main() {
 	for _, account := range accounts {
 		targets = append(targets, account)
 		if len(targets) == operationsLimit || i == len(accounts)-1 {
-			if err := createAccount(targets); err != nil {
-				printError("failed to create accounts", err)
+			if err := payment(targets); err != nil {
+				printError("failed to payments", err)
 			}
 			targets = []Account{}
 		}
@@ -393,20 +401,17 @@ func main() {
 	for _, account := range accounts {
 		ac, err := getAccount(account.address)
 		if err != nil {
-			log.Error("account was not created", "address", account.address)
+			log.Error("payment", "address", account.address, "amount", account.amount)
 			continue
 		}
-		if ac.Balance != account.balance {
-			log.Error(
-				"balance is different",
-				"address", account.address,
-				"expected", account.balance,
-				"created", ac.Balance,
-			)
+		expected := oldAccounts[ac.Address].Balance + account.amount
+		if expected != ac.Balance {
+			log.Error("failed to payment", "address", account.address, "expected", expected, "current", ac.Balance)
 			continue
 		}
+
 		log.Info("checked", "address", account.address, "balance", ac.Balance)
 	}
 
-	log.Info("accounts created", "count", len(accounts))
+	log.Info("payment done", "count", len(accounts))
 }
