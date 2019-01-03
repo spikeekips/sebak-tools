@@ -38,6 +38,7 @@ const (
 )
 
 var (
+	flagInit            bool
 	flagSEBAKEndpoint   string = "http://127.0.0.1:12345"
 	flagSEBAKJSONRPC    string = "http://127.0.0.1:54321/jsonrpc"
 	flagLogLevel        string = defaultLogLevel.String()
@@ -71,7 +72,7 @@ var (
 	totalHoldersFile   string
 )
 
-var chanStop = make(chan os.Signal)
+var chanStop = make(chan os.Signal, 1)
 
 func printError(s string, err error) {
 	var errString string
@@ -83,7 +84,7 @@ func printError(s string, err error) {
 		fmt.Println("error:", s, "", errString)
 	}
 
-	os.Exit(1)
+	exit(1)
 }
 
 func printFlagError(s string, err error) {
@@ -98,23 +99,20 @@ func printFlagError(s string, err error) {
 	fmt.Fprintf(os.Stderr, "Usage: %s <secret seed> <accounts>\n", os.Args[0])
 
 	flag.PrintDefaults()
-	os.Exit(1)
+	exit(1)
+}
+
+func exit(s int) {
+	if len(snapshot) > 0 {
+		releaseSnapshot()
+	}
+
+	os.Exit(s)
 }
 
 func init() {
-	signal.Notify(chanStop, syscall.SIGTERM)
-	signal.Notify(chanStop, syscall.SIGINT)
-
-	go func() {
-		sig := <-chanStop
-
-		if len(snapshot) > 0 {
-			releaseSnapshot()
-		}
-		os.Exit(0)
-	}()
-
 	flags = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flags.BoolVar(&flagInit, "init", flagInit, "initialize")
 	flags.StringVar(&flagSEBAKEndpoint, "sebak", flagSEBAKEndpoint, "sebak endpoint")
 	flags.StringVar(&flagSEBAKJSONRPC, "sebak-jsonrpc", flagSEBAKJSONRPC, "sebak jsonrpc")
 	flags.StringVar(&flagLogLevel, "log-level", flagLogLevel, "log level, {crit, error, warn, info, debug}")
@@ -194,9 +192,31 @@ func init() {
 	totalInflationFile = filepath.Join(flagS3Path, "total-inflation.txt")
 	totalSupplyFile = filepath.Join(flagS3Path, "total-supply.txt")
 	totalHoldersFile = filepath.Join(flagS3Path, "top-holders%s.txt")
+
+	{
+		var err error
+		if snapshot, err = openSnapshot(); err != nil {
+			printError("failed to open snapshot", err)
+		}
+
+		signal.Notify(chanStop, syscall.SIGTERM)
+		signal.Notify(chanStop, syscall.SIGINT)
+		signal.Notify(chanStop, syscall.SIGKILL)
+
+		go func() {
+			<-chanStop
+
+			if len(snapshot) > 0 {
+				releaseSnapshot()
+			}
+			exit(0)
+		}()
+	}
 }
 
 func openSnapshot() (snapshot string, err error) {
+	log.Debug("trying to open snapshot")
+
 	var message []byte
 	if message, err = jsonrpc.EncodeClientRequest("DB.OpenSnapshot", &runner.DBOpenSnapshotResult{}); err != nil {
 		return
@@ -222,10 +242,14 @@ func openSnapshot() (snapshot string, err error) {
 	}
 
 	snapshot = result.Snapshot
+
+	log.Debug("snapshot opened")
 	return
 }
 
 func releaseSnapshot() (err error) {
+	log.Debug("trying to release snapshot", "snapshot", snapshot)
+
 	var message []byte
 	if message, err = jsonrpc.EncodeClientRequest("DB.ReleaseSnapshot", &runner.DBReleaseSnapshot{Snapshot: snapshot}); err != nil {
 		return
@@ -245,10 +269,13 @@ func releaseSnapshot() (err error) {
 	}
 	defer resp.Body.Close()
 
-	var result DBReleaseSnapshotResult
+	var result runner.DBReleaseSnapshotResult
 	if err = jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
 		return
 	}
+
+	snapshot = ""
+	log.Debug("snapshot released")
 
 	return
 }
@@ -424,63 +451,66 @@ func (a SortByBalance) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a SortByBalance) Less(i, j int) bool { return a[i].Balance > a[j].Balance }
 
 func getInflation() (height uint64, inflation map[operation.OperationType]common.Amount, err error) {
-	{ // latest block from s3
-		var b []byte
-		if b, err = downloadS3(latestBlockFile); err != nil {
-			log.Error("failed to download `.latest-block.txt` from s3", "error", err)
-		} else {
-			log.Debug("downloaded `.latest-block.txt` from s3", "content", string(b))
-			if height, err = strconv.ParseUint(string(b), 10, 64); err != nil {
-				log.Error("failed parse `.latest-block.txt`", "error", err)
-				height = 0
-			}
-		}
-
-		log.Debug("start height", "height", height)
-	}
-
 	inflation = map[operation.OperationType]common.Amount{}
 
-	if height > 0 { // latest inflation data
-		var b []byte
-		if b, err = downloadS3(totalInflationFile); err != nil {
-			log.Error("failed to download latest inflation data from s3", "error", err)
-		} else {
-			log.Debug("downloaded latest inflation data from s3", "content", string(b))
-
-			var l string
-			for _, s := range strings.Split(string(b), "\n") {
-				if strings.Contains(s, "#") {
-					continue
-				} else if len(strings.TrimSpace(s)) < 1 {
-					continue
+	if !flagInit {
+		{
+			// latest block from s3
+			var b []byte
+			if b, err = downloadS3(latestBlockFile); err != nil {
+				log.Error("failed to download `.latest-block.txt` from s3", "error", err)
+			} else {
+				log.Debug("downloaded `.latest-block.txt` from s3", "content", string(b))
+				if height, err = strconv.ParseUint(string(b), 10, 64); err != nil {
+					log.Error("failed parse `.latest-block.txt`", "error", err)
+					height = 0
 				}
-
-				l = s
-				break
 			}
 
-			s := strings.SplitN(l, ",", 3)
-			if len(s) == 3 {
-				var i uint64
-				if i, err = strconv.ParseUint(s[1], 10, 64); err != nil {
-					log.Error("failed to parse TypeInflation", "content", s[1])
-					goto end
-				}
-				inflation[operation.TypeInflation] = common.Amount(i)
-
-				if i, err = strconv.ParseUint(s[2], 10, 64); err != nil {
-					log.Error("failed to parse TypeInflationPF", "content", s[1])
-					goto end
-				}
-				inflation[operation.TypeInflationPF] = common.Amount(i)
-			}
+			log.Debug("start height", "height", height)
 		}
 
-	end:
-		//
+		if height > 0 { // latest inflation data
+			var b []byte
+			if b, err = downloadS3(totalInflationFile); err != nil {
+				log.Error("failed to download latest inflation data from s3", "error", err)
+			} else {
+				log.Debug("downloaded latest inflation data from s3", "content", string(b))
 
-		log.Debug("latest inflation data loaded", "data", inflation)
+				var l string
+				for _, s := range strings.Split(string(b), "\n") {
+					if strings.Contains(s, "#") {
+						continue
+					} else if len(strings.TrimSpace(s)) < 1 {
+						continue
+					}
+
+					l = s
+					break
+				}
+
+				s := strings.SplitN(l, ",", 3)
+				if len(s) == 3 {
+					var i uint64
+					if i, err = strconv.ParseUint(s[1], 10, 64); err != nil {
+						log.Error("failed to parse TypeInflation", "content", s[1])
+						goto end
+					}
+					inflation[operation.TypeInflation] = common.Amount(i)
+
+					if i, err = strconv.ParseUint(s[2], 10, 64); err != nil {
+						log.Error("failed to parse TypeInflationPF", "content", s[1])
+						goto end
+					}
+					inflation[operation.TypeInflationPF] = common.Amount(i)
+				}
+			}
+
+		end:
+			//
+
+			log.Debug("latest inflation data loaded", "data", inflation)
+		}
 	}
 
 	var cursor []byte
@@ -510,11 +540,13 @@ func getInflation() (height uint64, inflation map[operation.OperationType]common
 			}
 			log.Debug("check block", "height", blk.Height)
 
-			if txInflation, err = getInflationFromTransaction(blk.ProposerTransaction); err != nil {
-				return
-			}
-			for t, amount := range txInflation {
-				inflation[t] = inflation[t].MustAdd(amount)
+			if blk.Height != common.GenesisBlockHeight {
+				if txInflation, err = getInflationFromTransaction(blk.ProposerTransaction); err != nil {
+					return
+				}
+				for t, amount := range txInflation {
+					inflation[t] = inflation[t].MustAdd(amount)
+				}
 			}
 
 			for _, h := range blk.Transactions {
@@ -606,7 +638,7 @@ func main() {
 		{ // save latest block
 			output, err := uploadS3(
 				latestBlockFile,
-				[]byte(strconv.FormatInt(int64(lastHeight), 10)),
+				[]byte(strconv.FormatUint(lastHeight, 10)),
 			)
 			if err != nil {
 				printError("failed to latest block upload to s3", err)
@@ -658,7 +690,7 @@ func main() {
 		}
 
 		log.Debug("total balance", "supply", total)
-		output, err := uploadS3(totalSupplyFile, []byte(strconv.FormatInt(int64(total), 10)))
+		output, err := uploadS3(totalSupplyFile, []byte(strconv.FormatUint(total, 10)))
 		if err != nil {
 			printError("failed to total supply upload to s3", err)
 		}
@@ -704,5 +736,5 @@ func main() {
 		}
 	}
 
-	os.Exit(0)
+	exit(0)
 }
