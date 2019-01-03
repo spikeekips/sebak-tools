@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"boscoin.io/sebak/lib/block"
 	"boscoin.io/sebak/lib/common"
@@ -61,11 +63,15 @@ var (
 	awsSession      *session.Session
 	nodeInfo        node.NodeInfo
 
+	snapshot string
+
 	latestBlockFile    string
 	totalInflationFile string
 	totalSupplyFile    string
 	totalHoldersFile   string
 )
+
+var chanStop = make(chan os.Signal)
 
 func printError(s string, err error) {
 	var errString string
@@ -96,6 +102,18 @@ func printFlagError(s string, err error) {
 }
 
 func init() {
+	signal.Notify(chanStop, syscall.SIGTERM)
+	signal.Notify(chanStop, syscall.SIGINT)
+
+	go func() {
+		sig := <-chanStop
+
+		if len(snapshot) > 0 {
+			releaseSnapshot()
+		}
+		os.Exit(0)
+	}()
+
 	flags = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	flags.StringVar(&flagSEBAKEndpoint, "sebak", flagSEBAKEndpoint, "sebak endpoint")
 	flags.StringVar(&flagSEBAKJSONRPC, "sebak-jsonrpc", flagSEBAKJSONRPC, "sebak jsonrpc")
@@ -178,9 +196,67 @@ func init() {
 	totalHoldersFile = filepath.Join(flagS3Path, "top-holders%s.txt")
 }
 
+func openSnapshot() (snapshot string, err error) {
+	var message []byte
+	if message, err = jsonrpc.EncodeClientRequest("DB.OpenSnapshot", &runner.DBOpenSnapshotResult{}); err != nil {
+		return
+	}
+
+	var req *http.Request
+	if req, err = http.NewRequest("POST", jsonrpcEndpoint.String(), bytes.NewBuffer(message)); err != nil {
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	client := new(http.Client)
+
+	var resp *http.Response
+	if resp, err = client.Do(req); err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result runner.DBOpenSnapshotResult
+	if err = jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
+		return
+	}
+
+	snapshot = result.Snapshot
+	return
+}
+
+func releaseSnapshot() (err error) {
+	var message []byte
+	if message, err = jsonrpc.EncodeClientRequest("DB.ReleaseSnapshot", &runner.DBReleaseSnapshot{Snapshot: snapshot}); err != nil {
+		return
+	}
+
+	var req *http.Request
+	if req, err = http.NewRequest("POST", jsonrpcEndpoint.String(), bytes.NewBuffer(message)); err != nil {
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	client := new(http.Client)
+
+	var resp *http.Response
+	if resp, err = client.Do(req); err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result DBReleaseSnapshotResult
+	if err = jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
+		return
+	}
+
+	return
+}
+
 func getAccounts(cursor []byte) (result runner.DBGetIteratorResult, err error) {
 	args := runner.DBGetIteratorArgs{
-		Prefix: common.BlockAccountPrefixAddress,
+		Snapshot: snapshot,
+		Prefix:   common.BlockAccountPrefixAddress,
 		Options: runner.GetIteratorOptions{
 			Limit:  runner.MaxLimitListOptions,
 			Cursor: cursor,
@@ -215,7 +291,8 @@ func getAccounts(cursor []byte) (result runner.DBGetIteratorResult, err error) {
 
 func getBlocks(cursor []byte) (result runner.DBGetIteratorResult, err error) {
 	args := runner.DBGetIteratorArgs{
-		Prefix: common.BlockPrefixHeight,
+		Snapshot: snapshot,
+		Prefix:   common.BlockPrefixHeight,
 		Options: runner.GetIteratorOptions{
 			Limit:   runner.MaxLimitListOptions,
 			Cursor:  cursor,
@@ -250,7 +327,10 @@ func getBlocks(cursor []byte) (result runner.DBGetIteratorResult, err error) {
 }
 
 func getDB(key string) (result runner.DBGetResult, err error) {
-	args := runner.DBGetArgs(key)
+	args := runner.DBGetArgs{
+		Snapshot: snapshot,
+		Key:      key,
+	}
 	var message []byte
 	if message, err = jsonrpc.EncodeClientRequest("DB.Get", &args); err != nil {
 		return
@@ -572,9 +652,9 @@ func main() {
 
 	{
 		log.Debug("calculating total supply")
-		var total common.Amount
+		var total uint64
 		for _, account := range accountsByBalance {
-			total = total.MustAdd(account.Balance)
+			total += uint64(account.Balance)
 		}
 
 		log.Debug("total balance", "supply", total)
