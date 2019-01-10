@@ -39,6 +39,7 @@ const (
 
 var (
 	flagInit            bool
+	flagDryrun          bool
 	flagSEBAKEndpoint   string = "http://127.0.0.1:12345"
 	flagSEBAKJSONRPC    string = "http://127.0.0.1:54321/jsonrpc"
 	flagLogLevel        string = defaultLogLevel.String()
@@ -70,18 +71,19 @@ var (
 	totalInflationFile string
 	totalSupplyFile    string
 	totalHoldersFile   string
+	frozenAccountFile  string
 )
 
 var chanStop = make(chan os.Signal, 1)
 
-func printError(s string, err error) {
+func printError(s string, err error, args ...interface{}) {
 	var errString string
 	if err != nil {
 		errString = err.Error()
 	}
 
 	if len(s) > 0 {
-		fmt.Println("error:", s, "", errString)
+		fmt.Println("error:", fmt.Sprintf(s, args...), ":", errString)
 	}
 
 	exit(1)
@@ -110,9 +112,25 @@ func exit(s int) {
 	os.Exit(s)
 }
 
+func parseCSV(b string) (l [][]string) {
+	for _, s := range strings.Split(b, "\n") {
+		if strings.Contains(s, "#") {
+			continue
+		} else if len(strings.TrimSpace(s)) < 1 {
+			continue
+		}
+
+		n := strings.Split(s, ",")
+		l = append(l, n)
+	}
+
+	return
+}
+
 func init() {
 	flags = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	flags.BoolVar(&flagInit, "init", flagInit, "initialize")
+	flags.BoolVar(&flagDryrun, "dry-run", flagDryrun, "dry-run")
 	flags.StringVar(&flagSEBAKEndpoint, "sebak", flagSEBAKEndpoint, "sebak endpoint")
 	flags.StringVar(&flagSEBAKJSONRPC, "sebak-jsonrpc", flagSEBAKJSONRPC, "sebak jsonrpc")
 	flags.StringVar(&flagLogLevel, "log-level", flagLogLevel, "log level, {crit, error, warn, info, debug}")
@@ -192,6 +210,7 @@ func init() {
 	totalInflationFile = filepath.Join(flagS3Path, "total-inflation.txt")
 	totalSupplyFile = filepath.Join(flagS3Path, "total-supply.txt")
 	totalHoldersFile = filepath.Join(flagS3Path, "top-holders%s.txt")
+	frozenAccountFile = filepath.Join(flagS3Path, "frozen-accounts.txt")
 
 	{
 		var err error
@@ -477,29 +496,21 @@ func getInflation() (height uint64, inflation map[operation.OperationType]common
 			} else {
 				log.Debug("downloaded latest inflation data from s3", "content", string(b))
 
-				var l string
-				for _, s := range strings.Split(string(b), "\n") {
-					if strings.Contains(s, "#") {
-						continue
-					} else if len(strings.TrimSpace(s)) < 1 {
-						continue
-					}
-
-					l = s
-					break
-				}
-
-				s := strings.SplitN(l, ",", 3)
-				if len(s) == 3 {
+				l := parseCSV(string(b))
+				if len(l) < 1 {
+					log.Error("failed to parse downloaded latest inflation data from s3")
+				} else if len(l[0]) < 3 {
+					log.Error("invalid downloaded latest inflation data from s3", "data", l)
+				} else {
 					var i uint64
-					if i, err = strconv.ParseUint(s[1], 10, 64); err != nil {
-						log.Error("failed to parse TypeInflation", "content", s[1])
+					if i, err = strconv.ParseUint(l[0][1], 10, 64); err != nil {
+						log.Error("failed to parse TypeInflation", "content", l[0][1])
 						goto end
 					}
 					inflation[operation.TypeInflation] = common.Amount(i)
 
-					if i, err = strconv.ParseUint(s[2], 10, 64); err != nil {
-						log.Error("failed to parse TypeInflationPF", "content", s[1])
+					if i, err = strconv.ParseUint(l[0][2], 10, 64); err != nil {
+						log.Error("failed to parse TypeInflationPF", "content", l[0][1])
 						goto end
 					}
 					inflation[operation.TypeInflationPF] = common.Amount(i)
@@ -520,9 +531,11 @@ func getInflation() (height uint64, inflation map[operation.OperationType]common
 
 	var txInflation map[operation.OperationType]common.Amount
 	var result runner.DBGetIteratorResult
+	var blk block.Block
+	var previousBlk block.Block
 	for {
 		if result, err = getBlocks(cursor); err != nil {
-			log.Error("failed to get block", "error", err)
+			log.Error("failed to get block", "error", err, "cursor", string(cursor))
 			return
 		}
 
@@ -533,12 +546,14 @@ func getInflation() (height uint64, inflation map[operation.OperationType]common
 				return
 			}
 
-			var blk block.Block
+			previousBlk = blk
 			if blk, err = getBlock(hash); err != nil {
-				log.Error("failed to get block", "hash", hash, "error", err)
+				log.Error("failed to get block", "hash", hash, "error", err, "cursor", string(cursor), "previousBlock", previousBlk)
 				return
 			}
-			log.Debug("check block", "height", blk.Height)
+			if blk.Height%1000 == 0 {
+				log.Debug("check block", "height", blk.Height)
+			}
 
 			if blk.Height != common.GenesisBlockHeight {
 				if txInflation, err = getInflationFromTransaction(blk.ProposerTransaction); err != nil {
@@ -564,6 +579,10 @@ func getInflation() (height uint64, inflation map[operation.OperationType]common
 			break
 		}
 		cursor = result.Items[len(result.Items)-1].Key
+	}
+
+	if blk.Height%1000 != 0 {
+		log.Debug("last checked block", "height", blk.Height)
 	}
 
 	return
@@ -598,10 +617,67 @@ func getInflationFromOperation(op operation.Operation) common.Amount {
 	case operation.TypeInflation:
 		return op.B.(operation.Payable).GetAmount()
 	case operation.TypeInflationPF:
-		return op.B.(operation.Payable).GetAmount()
+		return op.B.(operation.InflationPF).GetAmount()
 	default:
 		return common.Amount(0)
 	}
+}
+
+func getBlockOperation(hash string) (bo block.BlockOperation, err error) {
+	var result runner.DBGetResult
+	if result, err = getDB(fmt.Sprintf("%s%s", common.BlockOperationPrefixHash, hash)); err != nil {
+		fmt.Println(">>>>>>>>>>>", err, hash)
+		return
+	}
+
+	err = json.Unmarshal(result.Value, &bo)
+	return
+}
+
+func getLastBlockOperation(address string) (bo block.BlockOperation, err error) {
+	args := runner.DBGetIteratorArgs{
+		Snapshot: snapshot,
+		Prefix:   fmt.Sprintf("%s%s-", common.BlockOperationPrefixSource, address),
+		Options: runner.GetIteratorOptions{
+			Limit:   1,
+			Reverse: false,
+		},
+	}
+
+	var message []byte
+	if message, err = jsonrpc.EncodeClientRequest("DB.GetIterator", &args); err != nil {
+		return
+	}
+
+	var req *http.Request
+	if req, err = http.NewRequest("POST", jsonrpcEndpoint.String(), bytes.NewBuffer(message)); err != nil {
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	client := new(http.Client)
+
+	var resp *http.Response
+	if resp, err = client.Do(req); err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result runner.DBGetIteratorResult
+	if err = jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
+		return
+	}
+
+	if len(result.Items) < 1 {
+		err = fmt.Errorf("BlockOperation not found")
+		return
+	}
+	var hash string
+	if err = json.Unmarshal(result.Items[0].Value, &hash); err != nil {
+		return
+	}
+
+	return getBlockOperation(hash)
 }
 
 var inflationTemplate = `
@@ -609,9 +685,16 @@ var inflationTemplate = `
 %s,%s,%s
 `
 
+var frozenTemplate = `
+# nubmer of frozen, total frozen amount, number of unfrozen, total unfrozen amount
+%d,%d,%d,%d
+`
+
 func main() {
+	var lastBlockHeight uint64
 	{ // inflation
 		lastHeight, inflation, err := getInflation()
+		lastBlockHeight = lastHeight
 		if err != nil {
 			printError("failed to get inflation", err)
 		}
@@ -624,7 +707,7 @@ func main() {
 			inflation[operation.TypeInflationPF],
 		)
 
-		{
+		if !flagDryrun {
 			output, err := uploadS3(
 				totalInflationFile,
 				[]byte(t),
@@ -633,10 +716,9 @@ func main() {
 				printError("failed to total inflation upload to s3", err)
 			}
 			log.Debug("total inflation uploaded", "location", output.Location)
-		}
 
-		{ // save latest block
-			output, err := uploadS3(
+			// save latest block
+			output, err = uploadS3(
 				latestBlockFile,
 				[]byte(strconv.FormatUint(lastHeight, 10)),
 			)
@@ -646,6 +728,10 @@ func main() {
 			log.Debug("latest block uploaded", "location", output.Location)
 		}
 	}
+
+	var frozen []string
+	var unfrozen []string
+	var frozenAmount common.Amount
 
 	accountsMap := map[string]block.BlockAccount{}
 	var accountsByBalance []block.BlockAccount
@@ -671,6 +757,10 @@ func main() {
 				if account.Balance > common.Amount(0) {
 					accountsByBalance = append(accountsByBalance, account)
 				}
+				if len(account.Linked) > 0 {
+					frozen = append(frozen, account.Address)
+					frozenAmount = frozenAmount.MustAdd(account.Balance)
+				}
 			}
 
 			if uint64(len(result.Items)) < result.Limit {
@@ -680,6 +770,53 @@ func main() {
 		}
 
 		log.Debug("all accounts", "accounts", len(accountsMap), "over-1", len(accountsByBalance))
+
+	}
+
+	{ // frozen account
+		var unfrozenAmount common.Amount
+		for _, address := range frozen {
+			bo, err := getLastBlockOperation(address)
+			if err != nil {
+				// TODO do panic?
+				//printError("error: failed to get BlockOperation: %v", err, address)
+				continue
+			}
+			if bo.Type != operation.TypeUnfreezingRequest {
+				continue
+			}
+			if lastBlockHeight-bo.Height < common.UnfreezingPeriod {
+				continue
+			}
+			unfrozen = append(unfrozen, address)
+			account := accountsMap[address]
+			unfrozenAmount = unfrozenAmount.MustAdd(account.Balance)
+		}
+
+		log.Debug(
+			"all freezing accounts",
+			"all", len(frozen),
+			"frozen", len(frozen)-len(unfrozen),
+			"unfrozen", len(unfrozen),
+			"frozen-amount", frozenAmount-unfrozenAmount,
+			"unfrozen-amount", unfrozenAmount,
+		)
+
+		if !flagDryrun {
+			t := fmt.Sprintf(
+				frozenTemplate,
+				len(frozen)-len(unfrozen),
+				frozenAmount-unfrozenAmount,
+				len(unfrozen),
+				unfrozenAmount,
+			)
+
+			output, err := uploadS3(frozenAccountFile, []byte(t))
+			if err != nil {
+				printError("failed to frozen upload to s3", err)
+			}
+			log.Debug("frozen uploaded", "location", output.Location)
+		}
 	}
 
 	{
@@ -690,11 +827,14 @@ func main() {
 		}
 
 		log.Debug("total balance", "supply", total)
-		output, err := uploadS3(totalSupplyFile, []byte(strconv.FormatUint(total, 10)))
-		if err != nil {
-			printError("failed to total supply upload to s3", err)
+
+		if !flagDryrun {
+			output, err := uploadS3(totalSupplyFile, []byte(strconv.FormatUint(total, 10)))
+			if err != nil {
+				printError("failed to total supply upload to s3", err)
+			}
+			log.Debug("total supply uploaded", "location", output.Location)
 		}
-		log.Debug("total supply uploaded", "location", output.Location)
 	}
 
 	{
@@ -710,7 +850,7 @@ func main() {
 			csvAll = append(csvAll, fmt.Sprintf("%s,%s", account.Address, account.Balance))
 		}
 
-		{
+		if !flagDryrun {
 			output, err := uploadS3(
 				fmt.Sprintf(
 					totalHoldersFile,
@@ -722,10 +862,8 @@ func main() {
 				printError("failed to top holders upload to s3", err)
 			}
 			log.Debug("top holders uploaded", "location", output.Location, "limit", flagTopHoldersLimit)
-		}
 
-		{
-			output, err := uploadS3(
+			output, err = uploadS3(
 				fmt.Sprintf(totalHoldersFile, ""),
 				[]byte(strings.Join(csvAll, "\n")),
 			)

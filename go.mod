@@ -73,4 +73,4 @@ require (
 	honnef.co/go/tools v0.0.0-20180920025451-e3ad64cb4ed3 // indirect
 )
 
-replace boscoin.io/sebak => /Users/spikeekips/workspace/blockchainos/sebak/src/boscoin.io/sebak
+replace boscoin.io/sebak => /Users/spikeekips/workspace/blockchainos/sebak
