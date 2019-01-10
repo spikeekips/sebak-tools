@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	jsonrpc "github.com/gorilla/rpc/json"
 	logging "github.com/inconshreveable/log15"
+	isatty "github.com/mattn/go-isatty"
 )
 
 const (
@@ -67,11 +68,12 @@ var (
 
 	snapshot string
 
-	latestBlockFile    string
-	totalInflationFile string
-	totalSupplyFile    string
-	totalHoldersFile   string
-	frozenAccountFile  string
+	latestBlockFile        string
+	totalInflationFile     string
+	totalSupplyFile        string
+	totalSupplyDetailsFile string
+	totalHoldersFile       string
+	frozenAccountFile      string
 )
 
 var chanStop = make(chan os.Signal, 1)
@@ -89,7 +91,7 @@ func printError(s string, err error, args ...interface{}) {
 	exit(1)
 }
 
-func printFlagError(s string, err error) {
+func printFlagsError(s string, err error) {
 	var errString string
 	if err != nil {
 		errString = err.Error()
@@ -127,6 +129,35 @@ func parseCSV(b string) (l [][]string) {
 	return
 }
 
+// gonToBOS prints with dot for GON.
+func gonToBOS(i interface{}) string {
+	var s string
+	switch i.(type) {
+	case uint64:
+		s = strconv.FormatUint(i.(uint64), 10)
+	case common.Amount:
+		s = i.(common.Amount).String()
+	}
+
+	if len(s) < 7 {
+		return fmt.Sprintf(
+			"0.%s%s",
+			strings.Repeat("0", 7-len(s)),
+			s,
+		)
+	}
+
+	if len(s) == 7 {
+		return fmt.Sprintf("0.%s", s)
+	}
+
+	return fmt.Sprintf("%s.%s", s[:len(s)-7], s[len(s)-7:])
+}
+
+func bosToString(s string) common.Amount {
+	return common.MustAmountFromString(strings.Replace(s, ".", "", 1))
+}
+
 func init() {
 	flags = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	flags.BoolVar(&flagInit, "init", flagInit, "initialize")
@@ -146,8 +177,43 @@ func init() {
 
 	flags.Parse(os.Args[1:])
 
+	{
+		var err error
+
+		if logLevel, err = logging.LvlFromString(flagLogLevel); err != nil {
+			printFlagsError("--log-level", err)
+		}
+
+		var logFormatter logging.Format
+		switch flagLogFormat {
+		case "terminal":
+			if isatty.IsTerminal(os.Stdout.Fd()) && len(flagLog) < 1 {
+				logFormatter = logging.TerminalFormat()
+			} else {
+				logFormatter = logging.LogfmtFormat()
+			}
+		case "json":
+			logFormatter = common.JsonFormatEx(false, true)
+		default:
+			printFlagsError("--log-format", fmt.Errorf("'%s'", flagLogFormat))
+		}
+
+		logHandler := logging.StreamHandler(os.Stdout, logFormatter)
+		if len(flagLog) > 0 {
+			if logHandler, err = logging.FileHandler(flagLog, logFormatter); err != nil {
+				printFlagsError("--log", err)
+			}
+		}
+
+		if logLevel == logging.LvlDebug { // only debug produces `caller` data
+			logHandler = logging.CallerFileHandler(logHandler)
+		}
+		logHandler = logging.LvlFilterHandler(logLevel, logHandler)
+		log.SetHandler(logHandler)
+	}
+
 	if len(flagS3Bucket) < 1 {
-		printFlagError("--s3-bucket", fmt.Errorf("must be given"))
+		printFlagsError("--s3-bucket", fmt.Errorf("must be given"))
 	}
 
 	{
@@ -156,17 +222,17 @@ func init() {
 
 		var err error
 		if awsSession, err = session.NewSession(&aws.Config{Region: aws.String(flagS3Region)}); err != nil {
-			printFlagError("failed to access aws s3", err)
+			printFlagsError("failed to access aws s3", err)
 		}
 	}
 
 	{
 		var err error
 		if endpoint, err = common.ParseEndpoint(flagSEBAKEndpoint); err != nil {
-			printFlagError("--sebak", err)
+			printFlagsError("--sebak", err)
 		}
 		if jsonrpcEndpoint, err = common.ParseEndpoint(flagSEBAKJSONRPC); err != nil {
-			printFlagError("--sebak-jsonrpc", err)
+			printFlagsError("--sebak-jsonrpc", err)
 		}
 	}
 
@@ -176,17 +242,17 @@ func init() {
 
 		// Keep-alive ignores timeout/idle timeout
 		if connection, err = common.NewHTTP2Client(0, 0, true); err != nil {
-			printFlagError("Error while creating network client", err)
+			printFlagsError("Error while creating network client", err)
 		}
 		client = network.NewHTTP2NetworkClient(endpoint, connection)
 
 		resp, err := client.Get("/")
 		if err != nil {
-			printFlagError("failed to connect sebak", err)
+			printFlagsError("failed to connect sebak", err)
 		}
 
 		if nodeInfo, err = node.NewNodeInfoFromJSON(resp); err != nil {
-			printFlagError("failed to parse node info response", err)
+			printFlagsError("failed to parse node info response", err)
 		}
 		networkID = []byte(nodeInfo.Policy.NetworkID)
 	}
@@ -209,6 +275,7 @@ func init() {
 	latestBlockFile = filepath.Join(flagS3Path, "latest-block.txt")
 	totalInflationFile = filepath.Join(flagS3Path, "total-inflation.txt")
 	totalSupplyFile = filepath.Join(flagS3Path, "total-supply.txt")
+	totalSupplyDetailsFile = filepath.Join(flagS3Path, "total-supply-details.txt")
 	totalHoldersFile = filepath.Join(flagS3Path, "top-holders%s.txt")
 	frozenAccountFile = filepath.Join(flagS3Path, "frozen-accounts.txt")
 
@@ -502,23 +569,10 @@ func getInflation() (height uint64, inflation map[operation.OperationType]common
 				} else if len(l[0]) < 3 {
 					log.Error("invalid downloaded latest inflation data from s3", "data", l)
 				} else {
-					var i uint64
-					if i, err = strconv.ParseUint(l[0][1], 10, 64); err != nil {
-						log.Error("failed to parse TypeInflation", "content", l[0][1])
-						goto end
-					}
-					inflation[operation.TypeInflation] = common.Amount(i)
-
-					if i, err = strconv.ParseUint(l[0][2], 10, 64); err != nil {
-						log.Error("failed to parse TypeInflationPF", "content", l[0][1])
-						goto end
-					}
-					inflation[operation.TypeInflationPF] = common.Amount(i)
+					inflation[operation.TypeInflation] = bosToString(l[0][2])
+					inflation[operation.TypeInflationPF] = bosToString(l[0][2])
 				}
 			}
-
-		end:
-			//
 
 			log.Debug("latest inflation data loaded", "data", inflation)
 		}
@@ -626,7 +680,6 @@ func getInflationFromOperation(op operation.Operation) common.Amount {
 func getBlockOperation(hash string) (bo block.BlockOperation, err error) {
 	var result runner.DBGetResult
 	if result, err = getDB(fmt.Sprintf("%s%s", common.BlockOperationPrefixHash, hash)); err != nil {
-		fmt.Println(">>>>>>>>>>>", err, hash)
 		return
 	}
 
@@ -637,10 +690,10 @@ func getBlockOperation(hash string) (bo block.BlockOperation, err error) {
 func getLastBlockOperation(address string) (bo block.BlockOperation, err error) {
 	args := runner.DBGetIteratorArgs{
 		Snapshot: snapshot,
-		Prefix:   fmt.Sprintf("%s%s-", common.BlockOperationPrefixSource, address),
+		Prefix:   fmt.Sprintf("%s%s-", common.BlockOperationPrefixPeers, address),
 		Options: runner.GetIteratorOptions{
 			Limit:   1,
-			Reverse: false,
+			Reverse: true,
 		},
 	}
 
@@ -680,18 +733,21 @@ func getLastBlockOperation(address string) (bo block.BlockOperation, err error) 
 	return getBlockOperation(hash)
 }
 
-var inflationTemplate = `
-# initial balance, block inflation, pf inflation
+var inflationTemplate = `# initial balance, block inflation, pf inflation
 %s,%s,%s
 `
 
-var frozenTemplate = `
-# nubmer of frozen, total frozen amount, number of unfrozen, total unfrozen amount
+var totalSupplyDetailsTemplate = `# block height, total supply
+%d,%s
+`
+
+var frozenTemplate = `# nubmer of frozen, total frozen amount, number of unfrozen, total unfrozen amount
 %d,%d,%d,%d
 `
 
 func main() {
 	var lastBlockHeight uint64
+
 	{ // inflation
 		lastHeight, inflation, err := getInflation()
 		lastBlockHeight = lastHeight
@@ -702,9 +758,9 @@ func main() {
 
 		t := fmt.Sprintf(
 			inflationTemplate,
-			nodeInfo.Policy.InitialBalance,
-			inflation[operation.TypeInflation],
-			inflation[operation.TypeInflationPF],
+			gonToBOS(nodeInfo.Policy.InitialBalance),
+			gonToBOS(inflation[operation.TypeInflation]),
+			gonToBOS(inflation[operation.TypeInflationPF]),
 		)
 
 		if !flagDryrun {
@@ -778,10 +834,10 @@ func main() {
 		for _, address := range frozen {
 			bo, err := getLastBlockOperation(address)
 			if err != nil {
-				// TODO do panic?
-				//printError("error: failed to get BlockOperation: %v", err, address)
-				continue
+				log.Crit("failed to get BlockOperation", "address", address, "error", err)
+				printError("failed to get BlockOperation", err)
 			}
+
 			if bo.Type != operation.TypeUnfreezingRequest {
 				continue
 			}
@@ -806,9 +862,9 @@ func main() {
 			t := fmt.Sprintf(
 				frozenTemplate,
 				len(frozen)-len(unfrozen),
-				frozenAmount-unfrozenAmount,
+				gonToBOS(frozenAmount-unfrozenAmount),
 				len(unfrozen),
-				unfrozenAmount,
+				gonToBOS(unfrozenAmount),
 			)
 
 			output, err := uploadS3(frozenAccountFile, []byte(t))
@@ -829,11 +885,23 @@ func main() {
 		log.Debug("total balance", "supply", total)
 
 		if !flagDryrun {
-			output, err := uploadS3(totalSupplyFile, []byte(strconv.FormatUint(total, 10)))
+			output, err := uploadS3(totalSupplyFile, []byte(gonToBOS(total)))
 			if err != nil {
 				printError("failed to total supply upload to s3", err)
 			}
 			log.Debug("total supply uploaded", "location", output.Location)
+
+			t := fmt.Sprintf(
+				totalSupplyDetailsTemplate,
+				lastBlockHeight,
+				gonToBOS(total),
+			)
+
+			output, err = uploadS3(totalSupplyDetailsFile, []byte(t))
+			if err != nil {
+				printError("failed to total supply detail upload to s3", err)
+			}
+			log.Debug("total supply detail uploaded", "location", output.Location)
 		}
 	}
 
@@ -841,13 +909,24 @@ func main() {
 		log.Debug("sorting top holders")
 		sort.Sort(SortByBalance(accountsByBalance))
 
-		var csv []string
-		var csvAll []string
+		csv := []string{"# order,address,balance"}
+		csvAll := []string{"# order,address,balance"}
+
 		for i, account := range accountsByBalance {
 			if i < flagTopHoldersLimit {
-				csv = append(csv, fmt.Sprintf("%s,%s", account.Address, account.Balance))
+				csv = append(csv, fmt.Sprintf(
+					"%d,%s,%s",
+					i,
+					account.Address,
+					gonToBOS(account.Balance),
+				))
 			}
-			csvAll = append(csvAll, fmt.Sprintf("%s,%s", account.Address, account.Balance))
+			csvAll = append(csvAll, fmt.Sprintf(
+				"%d,%s,%s",
+				i,
+				account.Address,
+				gonToBOS(account.Balance),
+			))
 		}
 
 		if !flagDryrun {
