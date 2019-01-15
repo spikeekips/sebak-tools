@@ -5,7 +5,6 @@ require (
 	boscoin.io/sebak v0.0.0-20190103024541-01496d1b0153
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
 	github.com/alecthomas/gometalinter v2.0.11+incompatible // indirect
-	github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf // indirect
 	github.com/andrew-d/go-termutil v0.0.0-20150726205930-009166a695a2
 	github.com/aws/aws-sdk-go v1.15.90
 	github.com/btcsuite/btcd v0.0.0-20181130015935-7d2daa5bfef2 // indirect
@@ -50,7 +49,7 @@ require (
 	github.com/prometheus/procfs v0.0.0-20190102135031-14fa7590c24d // indirect
 	github.com/rogpeppe/godef v1.0.0 // indirect
 	github.com/satori/go.uuid v1.2.0
-	github.com/sirupsen/logrus v1.2.0 // indirect
+	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.3 // indirect
 	github.com/stamblerre/gocode v0.0.0-20181204161302-e160f63d4b91 // indirect
 	github.com/stellar/go v0.0.0-20190102203926-6d51e38d27ee
@@ -60,7 +59,7 @@ require (
 	github.com/ulule/limiter v2.2.2+incompatible // indirect
 	github.com/zmb3/gogetdoc v0.0.0-20181120020305-71611d8dcf25 // indirect
 	golang.org/x/arch v0.0.0-20181203225421-5a4828bb7045 // indirect
-	golang.org/x/crypto v0.0.0-20190102171810-8d7daa0c54b3 // indirect
+	golang.org/x/crypto v0.0.0-20190102171810-8d7daa0c54b3
 	golang.org/x/lint v0.0.0-20181026193005-c67002cb31c3 // indirect
 	golang.org/x/net v0.0.0-20181220203305-927f97764cc3
 	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4 // indirect
