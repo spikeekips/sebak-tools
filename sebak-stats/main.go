@@ -61,7 +61,7 @@ var (
 	endpoint        *common.Endpoint
 	jsonrpcEndpoint *common.Endpoint
 	logLevel        logging.Lvl
-	log             logging.Logger = logging.New("module", "sebak-cmc-statistics")
+	log             logging.Logger = logging.New("module", "sebak-stats")
 	client          *network.HTTP2NetworkClient
 	awsSession      *session.Session
 	nodeInfo        node.NodeInfo
