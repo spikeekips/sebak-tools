@@ -22,7 +22,6 @@ var (
 	flagLog          string      = common.GetENVValue("SEBAK_LOG", "")
 	flagLogLevel     string      = common.GetENVValue("SEBAK_LOG_LEVEL", defaultLogLevel.String())
 	flagLogFormat    string      = common.GetENVValue("SEBAK_LOG_FORMAT", defaultLogFormat)
-	flagVerbose      bool
 	flagForce        bool
 
 	flagSource       string
@@ -170,7 +169,6 @@ func init() {
 		dumpCmd.Flags().StringVar(&flagLogLevel, "log-level", flagLogLevel, "log level, {crit, error, warn, info, debug}")
 		dumpCmd.Flags().StringVar(&flagLogFormat, "log-format", flagLogFormat, "log format, {terminal, json}")
 		dumpCmd.Flags().StringVar(&flagLog, "log", flagLog, "set log file")
-		dumpCmd.Flags().BoolVar(&flagVerbose, "verbose", flagVerbose, "verbose")
 		dumpCmd.Flags().BoolVar(&flagForce, "force", flagForce, "clean up by force")
 		dumpCmd.Flags().Var(&flagPrefix, "prefix", "set prefix")
 		dumpCmd.Flags().BoolVar(&flagListPrefix, "list-prefix", flagListPrefix, "list all prefixes")
@@ -201,7 +199,6 @@ func init() {
 		importCmd.Flags().StringVar(&flagLogLevel, "log-level", flagLogLevel, "log level, {crit, error, warn, info, debug}")
 		importCmd.Flags().StringVar(&flagLogFormat, "log-format", flagLogFormat, "log format, {terminal, json}")
 		importCmd.Flags().StringVar(&flagLog, "log", flagLog, "set log file")
-		importCmd.Flags().BoolVar(&flagVerbose, "verbose", flagVerbose, "verbose")
 		importCmd.Flags().BoolVar(&flagForce, "force", flagForce, "clean up by force")
 
 		cmd.AddCommand(importCmd)

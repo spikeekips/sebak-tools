@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -204,7 +205,8 @@ func NewGzipWriter(name string) (*GzipWriter, error) {
 		return nil, err
 	}
 
-	return &GzipWriter{f: f, gw: gzip.NewWriter(f)}, nil
+	gw, _ := gzip.NewWriterLevel(f, flate.BestSpeed)
+	return &GzipWriter{f: f, gw: gw}, nil
 }
 
 func (g *GzipWriter) Write(b []byte) (int, error) {
@@ -243,15 +245,6 @@ func (i *ListFlags) Set(value string) error {
 }
 
 func saveItemToOutput(cmd *cobra.Command, prefix string, item storage.IterItem) error {
-	if flagVerbose {
-		log.Debug(
-			"got output data",
-			"string-key", string(item.Key),
-			"key", shortLogValue(item.Key),
-			"value", shortLogValue(item.Value),
-		)
-	}
-
 	if stOutput != nil {
 		return stOutput.Core.Put(item.Key, item.Value, nil)
 	}

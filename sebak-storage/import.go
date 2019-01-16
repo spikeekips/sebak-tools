@@ -101,7 +101,6 @@ func parseFlagsImport(args []string) {
 	parsedFlags = append(parsedFlags, "\n\tlog-format", flagLogFormat)
 	parsedFlags = append(parsedFlags, "\n\tlog", flagLog)
 	parsedFlags = append(parsedFlags, "\n\tforce", flagForce)
-	parsedFlags = append(parsedFlags, "\n\tverbose", flagVerbose)
 	parsedFlags = append(parsedFlags, "\n\tjson dump", flagSource)
 	parsedFlags = append(parsedFlags, "\n\toutput", flagOutput)
 	parsedFlags = append(parsedFlags, "\n", "")
@@ -166,7 +165,7 @@ func importSourceFile(p string) {
 			)
 		}
 		if count%100000 == 0 {
-			log.Debug("items loaded", "file", p, "count", count)
+			log.Debug("items loaded", "file", filepath.Base(p), "count", count)
 		}
 		count += 1
 	}

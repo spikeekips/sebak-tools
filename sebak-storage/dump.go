@@ -155,7 +155,6 @@ func parseFlagsDump(args []string) {
 	parsedFlags = append(parsedFlags, "\n\tlog-format", flagLogFormat)
 	parsedFlags = append(parsedFlags, "\n\tlog", flagLog)
 	parsedFlags = append(parsedFlags, "\n\tforce", flagForce)
-	parsedFlags = append(parsedFlags, "\n\tverbose", flagVerbose)
 	parsedFlags = append(parsedFlags, "\n\tsource", flagSource)
 	parsedFlags = append(parsedFlags, "\n\toutput", flagOutput)
 	parsedFlags = append(parsedFlags, "\n\tjsonRPCEndpoint", jsonRPCEndpoint)
@@ -214,54 +213,15 @@ end:
 }
 
 func dumpJsonRPC(prefix string) {
-	defer func() { // ReleaseSnapshot
-		if len(jsonrpcSnapshot) < 1 {
-			return
-		}
-		resp, err := request("DB.ReleaseSnapshot", &runner.DBReleaseSnapshot{Snapshot: jsonrpcSnapshot})
-		if err != nil {
-			log.Error("failed to ReleaseSnapshot", "error", err)
-			return
-		}
-		defer resp.Body.Close()
-
-		var result runner.DBReleaseSnapshotResult
-		if err := jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
-			log.Error("failed to ReleaseSnapshot", "error", err)
-			return
-		}
-		log.Debug("snapshot released", "result", result)
-
-		return
-	}()
-
-	{ // OpenSnapshot
-		resp, err := request("DB.OpenSnapshot", &runner.DBOpenSnapshotResult{})
-		if err != nil {
-			log.Error("failed to OpenSnapshot", "error", err)
-			return
-		}
-		defer resp.Body.Close()
-
-		var result runner.DBOpenSnapshotResult
-		if err := jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
-			log.Error("failed to OpenSnapshot", "error", err)
-			return
-		}
-
-		jsonrpcSnapshot = result.Snapshot
-	}
+	log.Debug(
+		"DB.GetIterator",
+		"prefix", allPrefixesWithName[prefix],
+		"limit", runner.MaxLimitListOptions,
+	)
 
 	var count int
 	var cursor []byte
 	for {
-		log.Debug(
-			"DB.GetIterator",
-			"prefix", []byte(prefix),
-			"cursor", cursor,
-			"limit", runner.MaxLimitListOptions,
-		)
-
 		args := runner.DBGetIteratorArgs{
 			Snapshot: jsonrpcSnapshot,
 			Prefix:   prefix,
@@ -273,7 +233,7 @@ func dumpJsonRPC(prefix string) {
 		}
 		resp, err := request("DB.GetIterator", &args)
 		if err != nil {
-			log.Error("failed to db.GetIterator", "error", err)
+			log.Error("failed to DB.GetIterator", "error", err)
 			return
 		}
 		defer resp.Body.Close()
@@ -285,7 +245,10 @@ func dumpJsonRPC(prefix string) {
 		}
 
 		count += len(result.Items)
-		log.Debug("got result", "items", len(result.Items), "limit", result.Limit)
+
+		if count%100000 == 0 {
+			log.Debug("put items", "count", count)
+		}
 
 		for _, item := range result.Items {
 			if err := saveItemToOutput(dumpCmd, prefix, item); err != nil {
@@ -300,7 +263,7 @@ func dumpJsonRPC(prefix string) {
 		cursor = result.Items[len(result.Items)-1].Key
 	}
 
-	log.Debug("db.GetIterator finished", "item-count", count)
+	log.Debug("DB.GetIterator finished", "item-count", count)
 }
 
 func dump() {
@@ -333,6 +296,47 @@ func dump() {
 		} else {
 			stSource = st
 		}
+	}
+
+	if jsonRPCEndpoint != nil {
+		{ // OpenSnapshot
+			resp, err := request("DB.OpenSnapshot", &runner.DBOpenSnapshotResult{})
+			if err != nil {
+				log.Error("failed to OpenSnapshot", "error", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			var result runner.DBOpenSnapshotResult
+			if err := jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
+				log.Error("failed to OpenSnapshot", "error", err)
+				return
+			}
+
+			jsonrpcSnapshot = result.Snapshot
+			log.Debug("snapshot opened", "result", result)
+		}
+
+		defer func() { // ReleaseSnapshot
+			if len(jsonrpcSnapshot) < 1 {
+				return
+			}
+			resp, err := request("DB.ReleaseSnapshot", &runner.DBReleaseSnapshot{Snapshot: jsonrpcSnapshot})
+			if err != nil {
+				log.Error("failed to ReleaseSnapshot", "error", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			var result runner.DBReleaseSnapshotResult
+			if err := jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
+				log.Error("failed to ReleaseSnapshot", "error", err)
+				return
+			}
+			log.Debug("snapshot released", "result", result)
+
+			return
+		}()
 	}
 
 	for _, prefix := range flagPrefix {
