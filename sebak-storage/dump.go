@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	jsonrpc "github.com/gorilla/rpc/json"
 
@@ -146,7 +147,7 @@ func parseFlagsDump(args []string) {
 				cmdcommon.PrintFlagsError(dumpCmd, "<output directory>", err)
 			}
 
-			jsonFiles = map[string]*GzipWriter{}
+			jsonFiles = &sync.Map{}
 		}
 	}
 
@@ -213,9 +214,10 @@ end:
 }
 
 func dumpJsonRPC(prefix string) {
+	prefix_name := allPrefixesWithName[prefix]
 	log.Debug(
 		"DB.GetIterator",
-		"prefix", allPrefixesWithName[prefix],
+		"prefix", prefix_name,
 		"limit", runner.MaxLimitListOptions,
 	)
 
@@ -233,26 +235,26 @@ func dumpJsonRPC(prefix string) {
 		}
 		resp, err := request("DB.GetIterator", &args)
 		if err != nil {
-			log.Error("failed to DB.GetIterator", "error", err)
+			log.Error("failed to DB.GetIterator", "error", err, "prefix", prefix_name)
 			return
 		}
 		defer resp.Body.Close()
 
 		var result runner.DBGetIteratorResult
 		if err := jsonrpc.DecodeClientResponse(resp.Body, &result); err != nil {
-			log.Error("failed to parse result", "error", err)
+			log.Error("failed to parse result", "error", err, "prefix", prefix_name)
 			return
 		}
 
 		count += len(result.Items)
 
 		if count%100000 == 0 {
-			log.Debug("put items", "count", count)
+			log.Debug("put items", "count", count, "prefix", prefix_name)
 		}
 
 		for _, item := range result.Items {
 			if err := saveItemToOutput(dumpCmd, prefix, item); err != nil {
-				log.Error("failed to save item", "error", err)
+				log.Error("failed to save item", "error", err, "prefix", prefix_name)
 				return
 			}
 		}
@@ -263,7 +265,7 @@ func dumpJsonRPC(prefix string) {
 		cursor = result.Items[len(result.Items)-1].Key
 	}
 
-	log.Debug("DB.GetIterator finished", "item-count", count)
+	log.Debug("DB.GetIterator finished", "item-count", count, "prefix", prefix_name)
 }
 
 func dump() {
@@ -282,9 +284,10 @@ func dump() {
 		}
 
 		if jsonFiles != nil {
-			for _, f := range jsonFiles {
-				f.Close()
-			}
+			jsonFiles.Range(func(k, v interface{}) bool {
+				v.(*GzipWriter).Close()
+				return true
+			})
 		}
 	}()
 
@@ -339,14 +342,21 @@ func dump() {
 		}()
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(len(flagPrefix))
 	for _, prefix := range flagPrefix {
 		p := allPrefixesByName[prefix]
 		if jsonRPCEndpoint != nil {
-			dumpJsonRPC(p)
+			go func() {
+				dumpJsonRPC(p)
+				wg.Done()
+			}()
 		} else if stSource != nil {
 			dumpSource(p)
 		}
 	}
+
+	wg.Wait()
 
 	log.Debug("finished")
 }

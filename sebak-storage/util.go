@@ -251,13 +251,16 @@ func saveItemToOutput(cmd *cobra.Command, prefix string, item storage.IterItem) 
 
 	if jsonFiles != nil {
 		var err error
-		f, found := jsonFiles[prefix]
-		if !found {
+		var f *GzipWriter
+		l, found := jsonFiles.Load(prefix)
+		if found {
+			f = l.(*GzipWriter)
+		} else {
 			f, err = NewGzipWriter(filepath.Join(flagOutput, allPrefixesWithName[prefix]) + ".json")
 			if err != nil {
 				cmdcommon.PrintError(cmd, fmt.Errorf("failed to create GzipWriter: %v", err))
 			}
-			jsonFiles[prefix] = f
+			jsonFiles.Store(prefix, f)
 		}
 
 		var b []byte

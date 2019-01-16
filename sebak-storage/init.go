@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 
 	logging "github.com/inconshreveable/log15"
@@ -38,7 +39,7 @@ var (
 	jsonrpcSnapshot string
 	stSource        *storage.LevelDBBackend
 	stOutput        *storage.LevelDBBackend
-	jsonFiles       map[string]*GzipWriter
+	jsonFiles       *sync.Map
 )
 
 var allPrefixes []string = []string{

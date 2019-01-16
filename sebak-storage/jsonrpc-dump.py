@@ -66,7 +66,7 @@ class JSONDump:
         self.output = output
         self.files = dict()
 
-    def put(self, key, value, *a, **kw):
+    def _get_file(self, key):
         prefix_name = _prefixes_reverse[key[:1]]
         try:
             f = self.files[prefix_name]
@@ -77,6 +77,11 @@ class JSONDump:
                 compresslevel=1,  # best speed
             )
             self.files[prefix_name] = f
+
+        return f
+
+    def put(self, key, value, *a, **kw):
+        f = self._get_file(key)
 
         f.write(json.dumps(dict(
             Key=base64.b64encode(key).decode('utf-8'),
@@ -177,7 +182,7 @@ def fetch_items(prefix):
 
             if OPTIONS.verbose:
                 if count > 0 and count % 100000 == 0:
-                    debug('* put items: %d' % count)
+                    debug('* put items: %s: %d' % (prefix_name, count))
 
             count += 1
 
@@ -188,7 +193,7 @@ def fetch_items(prefix):
         # debug('> cursor:', key)
         cursor = key
 
-    debug('< done %s: %d: %0.4fs' % (prefix_name, count, time.time() - start_time))
+    debug('< done: %s: %d: %0.4fs' % (prefix_name, count, time.time() - start_time))
 
     return count
 
@@ -197,13 +202,6 @@ if __name__ == '__main__':
     PARSER = argparse.ArgumentParser(
         description='Dump sebak storage thru jsonrpc',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    PARSER.add_argument(
-        '-s',
-        '--sebak',
-        dest='sebak',
-        help='jsonrpc url of sebak',
-        default='http://localhost:54321/jsonrpc',
     )
     PARSER.add_argument('--format', choices=('leveldb', 'json'), default='json', help='verbose')
     PARSER.add_argument(
@@ -214,6 +212,7 @@ if __name__ == '__main__':
         help='don\'t change anything',
     )
     PARSER.add_argument('--verbose', action='store_true', dest='verbose', default=False, help='verbose')
+    PARSER.add_argument('sebak', help='sebak jsonrpc')
     PARSER.add_argument('output', help='output leveldb directory')
 
     OPTIONS = PARSER.parse_args()
@@ -251,7 +250,6 @@ if __name__ == '__main__':
 
     # DB.GetIterator method; all
     all_count = 0
-
     for _, prefix in prefixes.items():
         all_count += fetch_items(prefix)
 

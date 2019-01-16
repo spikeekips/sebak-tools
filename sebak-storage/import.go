@@ -164,7 +164,7 @@ func importSourceFile(p string) {
 				fmt.Errorf("failed to save item: %s: `%s`: %v", p, string(b), err),
 			)
 		}
-		if count%100000 == 0 {
+		if count > 0 && count%100000 == 0 {
 			log.Debug("items loaded", "file", filepath.Base(p), "count", count)
 		}
 		count += 1
@@ -176,6 +176,7 @@ func importSource() {
 	if err != nil {
 		cmdcommon.PrintFlagsError(importCmd, "<json dump directory>", err)
 	}
+
 	for _, f := range files {
 		log.Debug("trying to load", "file", f.Name())
 		importSourceFile(filepath.Join(flagSource, f.Name()))
