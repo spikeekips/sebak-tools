@@ -14,13 +14,6 @@ import (
 	"strings"
 	"syscall"
 
-	"boscoin.io/sebak/lib/block"
-	"boscoin.io/sebak/lib/common"
-	"boscoin.io/sebak/lib/network"
-	"boscoin.io/sebak/lib/node"
-	"boscoin.io/sebak/lib/node/runner"
-	"boscoin.io/sebak/lib/transaction"
-	"boscoin.io/sebak/lib/transaction/operation"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -28,6 +21,14 @@ import (
 	jsonrpc "github.com/gorilla/rpc/json"
 	logging "github.com/inconshreveable/log15"
 	isatty "github.com/mattn/go-isatty"
+
+	"boscoin.io/sebak/lib/block"
+	"boscoin.io/sebak/lib/common"
+	"boscoin.io/sebak/lib/network"
+	"boscoin.io/sebak/lib/node"
+	"boscoin.io/sebak/lib/node/runner"
+	"boscoin.io/sebak/lib/transaction"
+	"boscoin.io/sebak/lib/transaction/operation"
 )
 
 const (
@@ -569,7 +570,7 @@ func getInflation() (height uint64, inflation map[operation.OperationType]common
 				} else if len(l[0]) < 3 {
 					log.Error("invalid downloaded latest inflation data from s3", "data", l)
 				} else {
-					inflation[operation.TypeInflation] = bosToString(l[0][2])
+					inflation[operation.TypeInflation] = bosToString(l[0][1])
 					inflation[operation.TypeInflationPF] = bosToString(l[0][2])
 				}
 			}
