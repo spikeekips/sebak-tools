@@ -743,7 +743,7 @@ var totalSupplyDetailsTemplate = `# block height, total supply
 `
 
 var frozenTemplate = `# nubmer of frozen, total frozen amount, number of unfrozen, total unfrozen amount
-%d,%d,%d,%d
+%d,%s,%d,%s
 `
 
 func main() {
