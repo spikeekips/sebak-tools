@@ -742,8 +742,8 @@ var totalSupplyDetailsTemplate = `# block height, total supply
 %d,%s
 `
 
-var frozenTemplate = `# nubmer of frozen, total frozen amount, number of unfrozen, total unfrozen amount
-%d,%s,%d,%s
+var frozenTemplate = `# number of membership, number of frozen, total frozen amount, number of unfrozen, total unfrozen amount
+%d,%d,%s,%d,%s
 `
 
 func main() {
@@ -786,6 +786,7 @@ func main() {
 		}
 	}
 
+	membershipCount := map[string]bool{}
 	var frozen []string
 	var unfrozen []string
 	var frozenAmount common.Amount
@@ -817,6 +818,7 @@ func main() {
 				if len(account.Linked) > 0 {
 					frozen = append(frozen, account.Address)
 					frozenAmount = frozenAmount.MustAdd(account.Balance)
+					membershipCount[account.Linked] = true
 				}
 			}
 
@@ -857,11 +859,13 @@ func main() {
 			"unfrozen", len(unfrozen),
 			"frozen-amount", frozenAmount-unfrozenAmount,
 			"unfrozen-amount", unfrozenAmount,
+			"membership-count", len(membershipCount),
 		)
 
 		if !flagDryrun {
 			t := fmt.Sprintf(
 				frozenTemplate,
+				len(membershipCount),
 				len(frozen)-len(unfrozen),
 				gonToBOS(frozenAmount-unfrozenAmount),
 				len(unfrozen),

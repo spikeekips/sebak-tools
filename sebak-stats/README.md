@@ -20,7 +20,7 @@
 
 ### Frozen Accounts
 ```
-# nubmer of frozen, total frozen amount, number of unfrozen, total unfrozen amount
+# number of membership, number of frozen, total frozen amount, number of unfrozen, total unfrozen amount
 ```
 
 
