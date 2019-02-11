@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -75,6 +76,7 @@ var (
 	totalSupplyDetailsFile string
 	totalHoldersFile       string
 	frozenAccountFile      string
+	dryrunDirectory        string
 )
 
 var chanStop = make(chan os.Signal, 1)
@@ -161,6 +163,13 @@ func bosToString(s string) common.Amount {
 
 func init() {
 	flags = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flags.SetOutput(os.Stderr)
+
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "Usage: %s <secret seed> <accounts>\n", os.Args[0])
+		flags.PrintDefaults()
+	}
+
 	flags.BoolVar(&flagInit, "init", flagInit, "initialize")
 	flags.BoolVar(&flagDryrun, "dry-run", flagDryrun, "dry-run")
 	flags.StringVar(&flagSEBAKEndpoint, "sebak", flagSEBAKEndpoint, "sebak endpoint")
@@ -258,6 +267,16 @@ func init() {
 		networkID = []byte(nodeInfo.Policy.NetworkID)
 	}
 
+	if flagDryrun {
+		f, err := ioutil.TempDir("/tmp", "sebak-stat")
+		if err != nil {
+			printError("failed to create temp directory", err)
+		}
+		dryrunDirectory = f
+		flagS3Path = ""
+		log.Info("output files will be saved in", "directory", dryrunDirectory)
+	}
+
 	parsedFlags := []interface{}{}
 	parsedFlags = append(parsedFlags, "\n\tsebak", endpoint)
 	parsedFlags = append(parsedFlags, "\n\tsebak-jsonrpc", jsonrpcEndpoint)
@@ -270,6 +289,7 @@ func init() {
 	parsedFlags = append(parsedFlags, "\n\ts3-path", flagS3Path)
 	parsedFlags = append(parsedFlags, "\n\ts3-path", flagS3ACL)
 	parsedFlags = append(parsedFlags, "\n\ts3-region", flagS3Region)
+	parsedFlags = append(parsedFlags, "\n\tdryrun-directory", dryrunDirectory)
 
 	log.Debug("parsed flags:", parsedFlags...)
 
@@ -517,7 +537,16 @@ func downloadS3(key string) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-func uploadS3(path string, body []byte) (*s3manager.UploadOutput, error) {
+func uploadS3(path string, body []byte) {
+	if flagDryrun {
+		err := ioutil.WriteFile(filepath.Join(dryrunDirectory, path), body, 0644)
+		if err != nil {
+			printError("failed to save file in dryrun directory", err)
+		}
+
+		return
+	}
+
 	uploadInput := &s3manager.UploadInput{
 		Bucket: aws.String(flagS3Bucket),
 		Key:    aws.String(path),
@@ -528,7 +557,11 @@ func uploadS3(path string, body []byte) (*s3manager.UploadOutput, error) {
 	}
 
 	svc := s3manager.NewUploader(awsSession)
-	return svc.Upload(uploadInput)
+	output, err := svc.Upload(uploadInput)
+	if err != nil {
+		printError(fmt.Sprintf("failed to upload %s to s3", path), err)
+	}
+	log.Debug("uploaded", "location", output.Location, "path", path)
 }
 
 type SortByBalance []block.BlockAccount
@@ -764,26 +797,14 @@ func main() {
 			gonToBOS(inflation[operation.TypeInflationPF]),
 		)
 
-		if !flagDryrun {
-			output, err := uploadS3(
-				totalInflationFile,
-				[]byte(t),
-			)
-			if err != nil {
-				printError("failed to total inflation upload to s3", err)
-			}
-			log.Debug("total inflation uploaded", "location", output.Location)
-
-			// save latest block
-			output, err = uploadS3(
-				latestBlockFile,
-				[]byte(strconv.FormatUint(lastHeight, 10)),
-			)
-			if err != nil {
-				printError("failed to latest block upload to s3", err)
-			}
-			log.Debug("latest block uploaded", "location", output.Location)
-		}
+		uploadS3(
+			totalInflationFile,
+			[]byte(t),
+		)
+		uploadS3(
+			latestBlockFile,
+			[]byte(strconv.FormatUint(lastHeight, 10)),
+		)
 	}
 
 	membershipCount := map[string]bool{}
@@ -862,22 +883,16 @@ func main() {
 			"membership-count", len(membershipCount),
 		)
 
-		if !flagDryrun {
-			t := fmt.Sprintf(
-				frozenTemplate,
-				len(membershipCount),
-				len(frozen)-len(unfrozen),
-				gonToBOS(frozenAmount-unfrozenAmount),
-				len(unfrozen),
-				gonToBOS(unfrozenAmount),
-			)
+		t := fmt.Sprintf(
+			frozenTemplate,
+			len(membershipCount),
+			len(frozen)-len(unfrozen),
+			gonToBOS(frozenAmount-unfrozenAmount),
+			len(unfrozen),
+			gonToBOS(unfrozenAmount),
+		)
 
-			output, err := uploadS3(frozenAccountFile, []byte(t))
-			if err != nil {
-				printError("failed to frozen upload to s3", err)
-			}
-			log.Debug("frozen uploaded", "location", output.Location)
-		}
+		uploadS3(frozenAccountFile, []byte(t))
 	}
 
 	{
@@ -889,25 +904,14 @@ func main() {
 
 		log.Debug("total balance", "supply", total)
 
-		if !flagDryrun {
-			output, err := uploadS3(totalSupplyFile, []byte(gonToBOS(total)))
-			if err != nil {
-				printError("failed to total supply upload to s3", err)
-			}
-			log.Debug("total supply uploaded", "location", output.Location)
+		uploadS3(totalSupplyFile, []byte(gonToBOS(total)))
 
-			t := fmt.Sprintf(
-				totalSupplyDetailsTemplate,
-				lastBlockHeight,
-				gonToBOS(total),
-			)
-
-			output, err = uploadS3(totalSupplyDetailsFile, []byte(t))
-			if err != nil {
-				printError("failed to total supply detail upload to s3", err)
-			}
-			log.Debug("total supply detail uploaded", "location", output.Location)
-		}
+		t := fmt.Sprintf(
+			totalSupplyDetailsTemplate,
+			lastBlockHeight,
+			gonToBOS(total),
+		)
+		uploadS3(totalSupplyDetailsFile, []byte(t))
 	}
 
 	{
@@ -934,28 +938,17 @@ func main() {
 			))
 		}
 
-		if !flagDryrun {
-			output, err := uploadS3(
-				fmt.Sprintf(
-					totalHoldersFile,
-					fmt.Sprintf("-%d", flagTopHoldersLimit),
-				),
-				[]byte(strings.Join(csv, "\n")),
-			)
-			if err != nil {
-				printError("failed to top holders upload to s3", err)
-			}
-			log.Debug("top holders uploaded", "location", output.Location, "limit", flagTopHoldersLimit)
-
-			output, err = uploadS3(
-				fmt.Sprintf(totalHoldersFile, ""),
-				[]byte(strings.Join(csvAll, "\n")),
-			)
-			if err != nil {
-				printError("failed to top holders upload to s3", err)
-			}
-			log.Debug("top holders uploaded", "location", output.Location)
-		}
+		uploadS3(
+			fmt.Sprintf(
+				totalHoldersFile,
+				fmt.Sprintf("-%d", flagTopHoldersLimit),
+			),
+			[]byte(strings.Join(csv, "\n")),
+		)
+		uploadS3(
+			fmt.Sprintf(totalHoldersFile, ""),
+			[]byte(strings.Join(csvAll, "\n")),
+		)
 	}
 
 	exit(0)
