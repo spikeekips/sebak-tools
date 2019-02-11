@@ -58,5 +58,3 @@ require (
 	gopkg.in/alecthomas/kingpin.v3-unstable v3.0.0-20180810215634-df19058c872c // indirect
 	honnef.co/go/tools v0.0.0-20180920025451-e3ad64cb4ed3 // indirect
 )
-
-replace boscoin.io/sebak => /Users/spikeekips/workspace/blockchainos/sebak
