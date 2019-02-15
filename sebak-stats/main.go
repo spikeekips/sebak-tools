@@ -72,16 +72,17 @@ var (
 
 	snapshot string
 
-	latestBlockFile        string
-	totalInflationFile     string
-	totalSupplyFile        string
-	totalSupplyDetailsFile string
-	totalHoldersFile       string
-	circulatingSupplyFile  string
-	frozenAccountFile      string
-	dryrunDirectory        string
-	excludeAccounts        []string
-	excludeAmount          common.Amount
+	latestBlockFile              string
+	totalInflationFile           string
+	totalSupplyFile              string
+	totalSupplyDetailsFile       string
+	totalHoldersFile             string
+	circulatingSupplyFile        string
+	circulatingSupplyDetailsFile string
+	frozenAccountFile            string
+	dryrunDirectory              string
+	excludeAccounts              []block.BlockAccount
+	excludeAmount                common.Amount
 )
 
 var chanStop = make(chan os.Signal, 1)
@@ -303,6 +304,7 @@ func init() {
 		}()
 	}
 
+	var excludeAddresses []string
 	{ // common account
 		blk, err := getBlockByHeight(common.GenesisBlockHeight)
 		if err != nil {
@@ -315,15 +317,17 @@ func init() {
 		}
 
 		target := tx.B.Operations[1].B.(operation.Targetable).TargetAddress()
-		excludeAccounts = append(excludeAccounts, target)
-		excludeAccounts = append(excludeAccounts, flagExcludeAccount...)
+
+		excludeAddresses = []string(flagExcludeAccount)
+		excludeAddresses = append(excludeAddresses, target)
 
 		// check accounts exist
-		for _, address := range excludeAccounts {
+		for _, address := range excludeAddresses {
 			ac, err := getAccount(address)
 			if err != nil {
 				printError(fmt.Sprintf("exclude account, '%s' does not exist", address), err)
 			}
+			excludeAccounts = append(excludeAccounts, ac)
 			excludeAmount = excludeAmount.MustAdd(ac.Balance)
 		}
 	}
@@ -341,7 +345,7 @@ func init() {
 	parsedFlags = append(parsedFlags, "\n\ts3-path", flagS3ACL)
 	parsedFlags = append(parsedFlags, "\n\ts3-region", flagS3Region)
 	parsedFlags = append(parsedFlags, "\n\tdryrun-directory", dryrunDirectory)
-	parsedFlags = append(parsedFlags, "\n\texclude-account", excludeAccounts)
+	parsedFlags = append(parsedFlags, "\n\texclude-account", excludeAddresses)
 	parsedFlags = append(parsedFlags, "\n\texclude-amount", excludeAmount)
 
 	log.Debug("parsed flags:", parsedFlags...)
@@ -353,6 +357,7 @@ func init() {
 	totalHoldersFile = filepath.Join(flagS3Path, "top-holders%s.txt")
 	frozenAccountFile = filepath.Join(flagS3Path, "frozen-accounts.txt")
 	circulatingSupplyFile = filepath.Join(flagS3Path, "circulating-supply.txt")
+	circulatingSupplyDetailsFile = filepath.Join(flagS3Path, "circulating-supply-details.txt")
 }
 
 func openSnapshot() (snapshot string, err error) {
@@ -838,6 +843,9 @@ var frozenTemplate = `# number of membership, number of frozen, total frozen amo
 %d,%d,%s,%d,%s
 `
 
+var circulatingDetailsTemplate = `# address, amount, description
+"-",%s,"circulating supply"`
+
 func main() {
 	var lastBlockHeight uint64
 
@@ -977,6 +985,12 @@ func main() {
 		log.Debug("circulating supply", "supply", circulating, "exclude", excludeAmount)
 
 		uploadS3(circulatingSupplyFile, []byte(gonToBOS(circulating)))
+
+		circulatingDetails := fmt.Sprintf(circulatingDetailsTemplate, gonToBOS(circulating))
+		for _, ac := range excludeAccounts {
+			circulatingDetails += fmt.Sprintf("\n%s,%s,\"\"", ac.Address, gonToBOS(ac.Balance))
+		}
+		uploadS3(circulatingSupplyDetailsFile, []byte(circulatingDetails))
 	}
 
 	{
