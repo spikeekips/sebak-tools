@@ -23,6 +23,7 @@ import (
 	logging "github.com/inconshreveable/log15"
 	isatty "github.com/mattn/go-isatty"
 
+	cmdcommon "boscoin.io/sebak/cmd/sebak/common"
 	"boscoin.io/sebak/lib/block"
 	"boscoin.io/sebak/lib/common"
 	"boscoin.io/sebak/lib/network"
@@ -55,6 +56,7 @@ var (
 	flagAWSAccessKeyID  string
 	flagAWSSecretKey    string
 	flagTopHoldersLimit int = 3000
+	flagExcludeAccount  cmdcommon.ListFlags
 )
 
 var (
@@ -75,8 +77,11 @@ var (
 	totalSupplyFile        string
 	totalSupplyDetailsFile string
 	totalHoldersFile       string
+	circulatingSupplyFile  string
 	frozenAccountFile      string
 	dryrunDirectory        string
+	excludeAccounts        []string
+	excludeAmount          common.Amount
 )
 
 var chanStop = make(chan os.Signal, 1)
@@ -184,6 +189,7 @@ func init() {
 	flags.StringVar(&flagS3Bucket, "s3-bucket", flagS3Bucket, "s3 bucket name")
 	flags.StringVar(&flagS3Path, "s3-path", flagS3Path, "s3 file path")
 	flags.StringVar(&flagS3ACL, "s3-acl", flagS3ACL, "s3 acl; {public-read}")
+	flags.Var(&flagExcludeAccount, "exclude-account", "exclude account for circulating-supply.txt")
 
 	flags.Parse(os.Args[1:])
 
@@ -277,29 +283,6 @@ func init() {
 		log.Info("output files will be saved in", "directory", dryrunDirectory)
 	}
 
-	parsedFlags := []interface{}{}
-	parsedFlags = append(parsedFlags, "\n\tsebak", endpoint)
-	parsedFlags = append(parsedFlags, "\n\tsebak-jsonrpc", jsonrpcEndpoint)
-	parsedFlags = append(parsedFlags, "\n\tlog-level", flagLogLevel)
-	parsedFlags = append(parsedFlags, "\n\tlog-format", flagLogFormat)
-	parsedFlags = append(parsedFlags, "\n\tlog", flagLog)
-	parsedFlags = append(parsedFlags, "\n\tnetwork-id", string(networkID))
-	parsedFlags = append(parsedFlags, "\n\ttop-holders-limit", flagTopHoldersLimit)
-	parsedFlags = append(parsedFlags, "\n\ts3Bucket", flagS3Bucket)
-	parsedFlags = append(parsedFlags, "\n\ts3-path", flagS3Path)
-	parsedFlags = append(parsedFlags, "\n\ts3-path", flagS3ACL)
-	parsedFlags = append(parsedFlags, "\n\ts3-region", flagS3Region)
-	parsedFlags = append(parsedFlags, "\n\tdryrun-directory", dryrunDirectory)
-
-	log.Debug("parsed flags:", parsedFlags...)
-
-	latestBlockFile = filepath.Join(flagS3Path, "latest-block.txt")
-	totalInflationFile = filepath.Join(flagS3Path, "total-inflation.txt")
-	totalSupplyFile = filepath.Join(flagS3Path, "total-supply.txt")
-	totalSupplyDetailsFile = filepath.Join(flagS3Path, "total-supply-details.txt")
-	totalHoldersFile = filepath.Join(flagS3Path, "top-holders%s.txt")
-	frozenAccountFile = filepath.Join(flagS3Path, "frozen-accounts.txt")
-
 	{
 		var err error
 		if snapshot, err = openSnapshot(); err != nil {
@@ -319,6 +302,57 @@ func init() {
 			exit(0)
 		}()
 	}
+
+	{ // common account
+		blk, err := getBlockByHeight(common.GenesisBlockHeight)
+		if err != nil {
+			printError("failed to get genesis block", err)
+		}
+
+		tx, err := getTransaction(blk.Transactions[0])
+		if err != nil {
+			printError("failed to get genesis transaction", err)
+		}
+
+		target := tx.B.Operations[1].B.(operation.Targetable).TargetAddress()
+		excludeAccounts = append(excludeAccounts, target)
+		excludeAccounts = append(excludeAccounts, flagExcludeAccount...)
+
+		// check accounts exist
+		for _, address := range excludeAccounts {
+			ac, err := getAccount(address)
+			if err != nil {
+				printError(fmt.Sprintf("exclude account, '%s' does not exist", address), err)
+			}
+			excludeAmount = excludeAmount.MustAdd(ac.Balance)
+		}
+	}
+
+	parsedFlags := []interface{}{}
+	parsedFlags = append(parsedFlags, "\n\tsebak", endpoint)
+	parsedFlags = append(parsedFlags, "\n\tsebak-jsonrpc", jsonrpcEndpoint)
+	parsedFlags = append(parsedFlags, "\n\tlog-level", flagLogLevel)
+	parsedFlags = append(parsedFlags, "\n\tlog-format", flagLogFormat)
+	parsedFlags = append(parsedFlags, "\n\tlog", flagLog)
+	parsedFlags = append(parsedFlags, "\n\tnetwork-id", string(networkID))
+	parsedFlags = append(parsedFlags, "\n\ttop-holders-limit", flagTopHoldersLimit)
+	parsedFlags = append(parsedFlags, "\n\ts3Bucket", flagS3Bucket)
+	parsedFlags = append(parsedFlags, "\n\ts3-path", flagS3Path)
+	parsedFlags = append(parsedFlags, "\n\ts3-path", flagS3ACL)
+	parsedFlags = append(parsedFlags, "\n\ts3-region", flagS3Region)
+	parsedFlags = append(parsedFlags, "\n\tdryrun-directory", dryrunDirectory)
+	parsedFlags = append(parsedFlags, "\n\texclude-account", excludeAccounts)
+	parsedFlags = append(parsedFlags, "\n\texclude-amount", excludeAmount)
+
+	log.Debug("parsed flags:", parsedFlags...)
+
+	latestBlockFile = filepath.Join(flagS3Path, "latest-block.txt")
+	totalInflationFile = filepath.Join(flagS3Path, "total-inflation.txt")
+	totalSupplyFile = filepath.Join(flagS3Path, "total-supply.txt")
+	totalSupplyDetailsFile = filepath.Join(flagS3Path, "total-supply-details.txt")
+	totalHoldersFile = filepath.Join(flagS3Path, "top-holders%s.txt")
+	frozenAccountFile = filepath.Join(flagS3Path, "frozen-accounts.txt")
+	circulatingSupplyFile = filepath.Join(flagS3Path, "circulating-supply.txt")
 }
 
 func openSnapshot() (snapshot string, err error) {
@@ -423,6 +457,16 @@ func getAccounts(cursor []byte) (result runner.DBGetIteratorResult, err error) {
 	return
 }
 
+func getAccount(address string) (ac block.BlockAccount, err error) {
+	var result runner.DBGetResult
+	if result, err = getDB(block.GetBlockAccountKey(address)); err != nil {
+		return
+	}
+
+	err = json.Unmarshal(result.Value, &ac)
+	return
+}
+
 func getBlocks(cursor []byte) (result runner.DBGetIteratorResult, err error) {
 	args := runner.DBGetIteratorArgs{
 		Snapshot: snapshot,
@@ -501,6 +545,20 @@ func getBlock(hash string) (blk block.Block, err error) {
 	return
 }
 
+func getBlockByHeight(height uint64) (blk block.Block, err error) {
+	var result runner.DBGetResult
+	if result, err = getDB(block.GetBlockKeyPrefixHeight(height)); err != nil {
+		return
+	}
+
+	var hash string
+	if err = json.Unmarshal(result.Value, &hash); err != nil {
+		return
+	}
+
+	return getBlock(hash)
+}
+
 func getTransaction(hash string) (tx transaction.Transaction, err error) {
 	var result runner.DBGetResult
 	if result, err = getDB(fmt.Sprintf("%s%s", common.TransactionPoolPrefix, hash)); err != nil {
@@ -559,6 +617,7 @@ func uploadS3(path string, body []byte) {
 	svc := s3manager.NewUploader(awsSession)
 	output, err := svc.Upload(uploadInput)
 	if err != nil {
+		log.Error("failed to upload to s3", "file", path, "erorr", err)
 		printError(fmt.Sprintf("failed to upload %s to s3", path), err)
 	}
 	log.Debug("uploaded", "location", output.Location, "path", path)
@@ -912,6 +971,12 @@ func main() {
 			gonToBOS(total),
 		)
 		uploadS3(totalSupplyDetailsFile, []byte(t))
+
+		// circulating-supply.txt
+		circulating := total - uint64(excludeAmount)
+		log.Debug("circulating supply", "supply", circulating, "exclude", excludeAmount)
+
+		uploadS3(circulatingSupplyFile, []byte(gonToBOS(circulating)))
 	}
 
 	{

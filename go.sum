@@ -15,6 +15,8 @@ boscoin.io/sebak v0.0.0-20181214020106-3df70d287f5e h1:bFP5RseduY/DsbAfEYyQcfZhI
 boscoin.io/sebak v0.0.0-20181214020106-3df70d287f5e/go.mod h1:1opxGAWzMfSq1DiJH3BR71OXhIH7jXssLUvSLRMwgCE=
 boscoin.io/sebak v0.0.0-20190103024541-01496d1b0153 h1:S3ol/Ocg/jPni3rT0h7tOoUd5mWH0GYAfu4JAzt0PGE=
 boscoin.io/sebak v0.0.0-20190103024541-01496d1b0153/go.mod h1:1opxGAWzMfSq1DiJH3BR71OXhIH7jXssLUvSLRMwgCE=
+boscoin.io/sebak v0.0.0-20190201044551-c0f3b99e3b32 h1:Pg9A8bikyYtKi5KNteLLB5wwUu0Cn+xGbpEtyv/pCuY=
+boscoin.io/sebak v0.0.0-20190201044551-c0f3b99e3b32/go.mod h1:dcllAZbB0LtONUP/jXSpeg+C9EKP3qJoTv+Iw8dVcFA=
 github.com/GianlucaGuarini/go-observable v0.0.0-20180829201609-d386f0081a66 h1:ZCS9b8IUAsE0A4cFeD9nVEQwwzOMxC+PUDf9clvlrhM=
 github.com/GianlucaGuarini/go-observable v0.0.0-20180829201609-d386f0081a66/go.mod h1:2pqNiwoZ8Fj1HBGWyPTXW/iPD332sJzTp3Iy0dIcFMc=
 github.com/VividCortex/gohistogram v1.0.0/go.mod h1:Pf5mBqqDxYaXu3hDrrU+w6nw50o/4+TcAqDqk/vUH7g=
