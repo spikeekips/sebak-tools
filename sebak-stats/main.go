@@ -318,11 +318,35 @@ func init() {
 
 		target := tx.B.Operations[1].B.(operation.Targetable).TargetAddress()
 
-		excludeAddresses = []string(flagExcludeAccount)
-		excludeAddresses = append(excludeAddresses, target)
+		var ea = []string(flagExcludeAccount)
+		ea = append(ea, target)
+		for _, address := range ea {
+			var found bool
+			for _, a := range excludeAddresses {
+				if a == address {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			excludeAddresses = append(excludeAddresses, address)
+		}
 
 		// check accounts exist
 		for _, address := range excludeAddresses {
+			var found bool
+			for _, a := range excludeAccounts {
+				if a.Address == address {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+
 			ac, err := getAccount(address)
 			if err != nil {
 				printError(fmt.Sprintf("exclude account, '%s' does not exist", address), err)
