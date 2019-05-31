@@ -85,7 +85,7 @@ func checkSource(s string) error {
 }
 
 func checkSourceJSONRpc(s string) error {
-	endpoint, err := common.NewEndpointFromString(s)
+	endpoint, err := common.ParseEndpoint(s)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,7 @@ module github.com/spikeekips/sebak-tools
 
 require (
 	9fans.net/go v0.0.0-20181112161441-237454027057 // indirect
-	boscoin.io/sebak v0.0.0-20190201044551-c0f3b99e3b32
+	boscoin.io/sebak v0.0.0-20190213022301-8aa4d74daff1
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
 	github.com/alecthomas/gometalinter v2.0.11+incompatible // indirect
 	github.com/andrew-d/go-termutil v0.0.0-20150726205930-009166a695a2
