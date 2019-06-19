@@ -9,6 +9,7 @@ import (
 	"text/template"
 
 	logging "github.com/inconshreveable/log15"
+	isatty "github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh/terminal"
 
@@ -147,7 +148,10 @@ func init() {
 		},
 	}
 
-	termWidth, _, _ := terminal.GetSize(int(os.Stdout.Fd()))
+	var termWidth int = 100
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		termWidth, _, _ = terminal.GetSize(int(os.Stdout.Fd()))
+	}
 
 	{
 		t := template.Must(template.New("example-dump").Parse(dumpExampleTemplate))
